@@ -1,0 +1,9 @@
+
+for i in 10..50000 do
+	for j in 0..i do
+		
+	end
+	for j in 0..i do
+		
+	end
+end

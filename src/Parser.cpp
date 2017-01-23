@@ -61,8 +61,8 @@ namespace coralc {
 	default:
 	    Error("expected integer or identifier");
 	}
-        auto decl = std::make_unique<ast::DeclImmutVar>(std::move(declLoopVar),
-							std::move(rangeStart));
+        auto decl = std::make_unique<ast::DeclImmutIntVar>(std::move(declLoopVar),
+							   std::move(rangeStart));
 	this->NextToken();
 	if (m_currentToken.id != Token::DO) {
 	    Error("expected do");

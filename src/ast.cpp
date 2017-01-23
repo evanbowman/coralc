@@ -21,59 +21,73 @@ namespace coralc {
 	}
 
 	const std::string & ForLoop::GetIdentName() const {
-	    return dynamic_cast<DeclImmutVar &>(*m_decl).GetIdentName();
+	    return dynamic_cast<DeclImmutIntVar &>(*m_decl).GetIdentName();
 	}
 
-	DeclImmutVar::DeclImmutVar(NodeRef ident, NodeRef value) :
+	DeclImmutIntVar::DeclImmutIntVar(NodeRef ident, NodeRef value) :
 	    m_ident(std::move(ident)),
 	    m_value(std::move(value)) {}
 
-	const std::string & DeclImmutVar::GetIdentName() const {
+	const std::string & DeclImmutIntVar::GetIdentName() const {
 	    return dynamic_cast<Ident &>(*m_ident).GetName();
 	}
 
 	// CODE GENERATION
 
+	template <typename F>
+	static llvm::AllocaInst * createEntryBlockAlloca(llvm::Function * fn,
+							 F && cb,
+							 llvm::LLVMContext & context,
+							 const std::string & varName) {
+	    llvm::IRBuilder<> tempBuilder(&fn->getEntryBlock(),
+					  fn->getEntryBlock().begin());
+	    return tempBuilder.CreateAlloca(cb(context), 0,
+					    varName.c_str());
+	}
+	
 	llvm::Value * Ident::CodeGen(LLVMState & state) {
 	    llvm::Value * value = state.vars[m_name].value;
 	    if (!value) {
 		throw std::runtime_error("reference to non-existent variable " + m_name);
 	    }
-	    return value;
+	    return state.builder.CreateLoad(value, m_name.c_str());
 	}
 	
-	llvm::Value * DeclImmutVar::CodeGen(LLVMState & state) {
+	llvm::Value * DeclImmutIntVar::CodeGen(LLVMState & state) {
 	    const auto & varName = dynamic_cast<Ident &>(*m_ident).GetName();
 	    if (state.vars.find(varName) == state.vars.end()) {
-		state.vars[varName].value = m_value->CodeGen(state);
+		auto fn = state.builder.GetInsertBlock()->getParent();
+		auto alloca = createEntryBlockAlloca(fn, llvm::Type::getInt32Ty,
+						     state.context, varName);
+		state.builder.CreateStore(m_value->CodeGen(state), alloca);
+		state.vars[varName] = {alloca, false};
 		return state.vars[varName].value;
 	    } else {
-		throw std::runtime_error("declaration of variable " + varName + " would shadow existing varaible");
+		throw std::runtime_error("declaration of variable "
+					 + varName + " would shadow existing varaible");
 	    }
 	}
 	
 	llvm::Value * ForLoop::CodeGen(LLVMState & state) {
-	    auto start = m_decl->CodeGen(state);
 	    auto fn = state.builder.GetInsertBlock()->getParent();
-	    auto header = state.builder.GetInsertBlock();
+	    m_decl->CodeGen(state);
+	    auto & varName = this->GetIdentName();
+	    auto alloca = state.vars[varName].value;
 	    auto loopBlock = llvm::BasicBlock::Create(state.context, "forloop", fn);
 	    state.builder.CreateBr(loopBlock);
 	    state.builder.SetInsertPoint(loopBlock);
-	    auto var =
-		state.builder.CreatePHI(llvm::Type::getInt32Ty(state.context), 2,
-					this->GetIdentName());
-	    var->addIncoming(start, header);
 	    m_block->CodeGen(state);
 	    auto stepVal = llvm::ConstantInt::get(state.context, llvm::APInt(32, 1));
-	    auto nextVar = state.builder.CreateFAdd(var, stepVal, "nextvar");
-	    auto end = m_end->CodeGen(state);
-	    end = state.builder.CreateICmpNE(end, nextVar, "loopcond");
-	    auto loopEndBlock = state.builder.GetInsertBlock();
+	    auto endCond = m_end->CodeGen(state);
+	    auto currVar = state.builder.CreateLoad(alloca, varName.c_str());
+	    auto nextVar = state.builder.CreateFAdd(currVar, stepVal, "nextvar");
+	    state.builder.CreateStore(nextVar, alloca);
+	    endCond = state.builder.CreateICmpNE(endCond, nextVar, "loopcond");
 	    auto afterBlock =
 		llvm::BasicBlock::Create(state.context, "afterloop", fn);
-	    state.builder.CreateCondBr(end, loopBlock, afterBlock);
+	    state.builder.CreateCondBr(endCond, loopBlock, afterBlock);
 	    state.builder.SetInsertPoint(afterBlock);
-	    var->addIncoming(nextVar, loopEndBlock);
+	    state.vars.erase(varName);
 	    return llvm::Constant::getNullValue(llvm::Type::getInt32Ty(state.context));
 	}
 	

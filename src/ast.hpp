@@ -21,7 +21,7 @@
 
 namespace coralc {
     struct VarInfo {
-	llvm::Value * value;
+	llvm::AllocaInst * value;
 	bool isMutable;
     };
     
@@ -32,14 +32,15 @@ namespace coralc {
         std::map<std::string, VarInfo> vars;
 	LLVMState() : builder(context),
 		      modRef(std::make_unique<llvm::Module>("top", context)) {
-	    auto funcType = llvm::FunctionType::get(builder.getVoidTy(), false);
+	    auto funcType = llvm::FunctionType::get(builder.getInt32Ty(), false);
 	    auto mainFunc = 
-		llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", modRef.get());
+		llvm::Function::Create(funcType, llvm::Function::ExternalLinkage,
+				       "main", modRef.get());
 	    auto entry = llvm::BasicBlock::Create(context, "entrypoint", mainFunc);
 	    builder.SetInsertPoint(entry);
 	}
 	~LLVMState() {
-	    builder.CreateRetVoid();
+	    builder.CreateRet(llvm::ConstantInt::get(context, llvm::APInt(32, 0)));
 	    llvm::WriteBitcodeToFile(modRef.get(), llvm::outs());
 	}
     };
@@ -71,11 +72,11 @@ namespace coralc {
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
-	class DeclImmutVar : public Node {
+	class DeclImmutIntVar : public Node {
 	    NodeRef m_ident, m_value;
 	public:
 	    const std::string & GetIdentName() const; 
-	    DeclImmutVar(NodeRef, NodeRef);
+	    DeclImmutIntVar(NodeRef, NodeRef);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 	

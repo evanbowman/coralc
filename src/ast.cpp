@@ -64,7 +64,7 @@ namespace coralc {
 		return state.vars[varName].value;
 	    } else {
 		throw std::runtime_error("declaration of variable "
-					 + varName + " would shadow existing varaible");
+					 + varName + " would shadow existing variable");
 	    }
 	}
 	

@@ -25,6 +25,7 @@ namespace coralc {
 	    RANGE,
 	    END,
 	    VAR,
+	    DEF,
 	    ASSIGN,
 	    COMMA,
 	    LBRACE,
@@ -33,6 +34,7 @@ namespace coralc {
 	    SUBTRACT,
 	    MULTIPLY,
 	    DIVIDE,
+	    RETURN,
 	    MUT,
 	    HASH,
 	    LPRN,
@@ -45,9 +47,17 @@ namespace coralc {
 	    Token id;
 	    std::string text;
 	};
-	ast::NodeRef ParseBlock();
+	struct FunctionInfo {
+	    std::string name;
+	    std::string returnType;
+	};
+	ast::NodeRef ParseTopLevelScope();
+	ast::NodeRef ParseFunctionDef();
+	ast::ScopeRef ParseScope();
+	ast::NodeRef ParseReturn();
 	ast::NodeRef ParseFor();
 	void NextToken();
 	TokenInfo m_currentToken;
+	FunctionInfo m_currentFunction;
     };
 }

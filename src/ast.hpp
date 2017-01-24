@@ -15,7 +15,6 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 
@@ -29,20 +28,11 @@ namespace coralc {
 	llvm::LLVMContext context;
 	llvm::IRBuilder<> builder;
 	std::unique_ptr<llvm::Module> modRef;
-        std::map<std::string, VarInfo> vars;
+	std::stack<llvm::BasicBlock *> stack;
+        llvm::BasicBlock * fnExitPoint = nullptr;
+	std::map<std::string, VarInfo> vars;
 	LLVMState() : builder(context),
-		      modRef(std::make_unique<llvm::Module>("top", context)) {
-	    auto funcType = llvm::FunctionType::get(builder.getInt32Ty(), false);
-	    auto mainFunc = 
-		llvm::Function::Create(funcType, llvm::Function::ExternalLinkage,
-				       "main", modRef.get());
-	    auto entry = llvm::BasicBlock::Create(context, "entrypoint", mainFunc);
-	    builder.SetInsertPoint(entry);
-	}
-	~LLVMState() {
-	    builder.CreateRet(llvm::ConstantInt::get(context, llvm::APInt(32, 0)));
-	    llvm::WriteBitcodeToFile(modRef.get(), llvm::outs());
-	}
+		      modRef(std::make_unique<llvm::Module>("top", context)) {}
     };
     
     namespace ast {
@@ -55,20 +45,49 @@ namespace coralc {
 	    virtual llvm::Value * CodeGen(LLVMState &) = 0;
 	    virtual ~Node() {}
 	};
-
-	class Block : public Node {
+	
+	class Scope : public Node {
 	    std::vector<NodeRef> m_children;
 	public:
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	    void AddChild(NodeRef);
+	};
+
+	class GlobalScope : public Scope {};
+
+	using ScopeRef = std::unique_ptr<Scope>;
+	
+	class ScopeProvider {
+	    ScopeRef m_scope;
+	public:
+	    ScopeProvider(ScopeRef scope) : m_scope(std::move(scope)) {}
+	    Scope & GetScope() {
+		return *m_scope;
+	    }
+	};
+
+	class Return : public Node {
+	    friend class Scope;
+	    NodeRef m_value;
+	public:
+	    Return(NodeRef);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
-	class ForLoop : public Node {
+	class Function : public Node, public ScopeProvider {
+	    std::string m_name;
+	    std::string m_returnType;
+	public:
+	    Function(ScopeRef, const std::string &, const std::string &);
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+	
+	class ForLoop : public Node, public ScopeProvider {
 	    std::string m_varName;
-	    NodeRef m_decl, m_end, m_block;
+	    NodeRef m_decl, m_end;
 	public:
 	    const std::string & GetIdentName() const;
-	    ForLoop(NodeRef, NodeRef, NodeRef);
+	    ForLoop(NodeRef, NodeRef, ScopeRef);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
@@ -77,6 +96,11 @@ namespace coralc {
 	public:
 	    const std::string & GetIdentName() const; 
 	    DeclImmutIntVar(NodeRef, NodeRef);
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+        struct Void : public Node {
+	public:
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 	

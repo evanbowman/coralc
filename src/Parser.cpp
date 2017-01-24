@@ -17,6 +17,14 @@ namespace coralc {
 	// TODO: Line and column info + context!!!
 	throw std::runtime_error("Error: " + err);
     }
+
+    ast::NodeRef Parser::ParseReturn() {
+	ast::NodeRef ret(new ast::Return(std::move(ast::NodeRef(new ast::Void))));
+	// All returns are void at the moment...
+	// until I can come up with an actually well thought out
+	// type system...
+	return ret;
+    }
     
     ast::NodeRef Parser::ParseFor() {
 	this->NextToken();
@@ -68,39 +76,85 @@ namespace coralc {
 	    Error("expected do");
 	}
 	this->NextToken();
-	auto block = this->ParseBlock();
-	auto forLoop = std::make_unique<ast::ForLoop>(std::move(decl),
-						      std::move(rangeEnd),
-						      std::move(block));
-	return ast::NodeRef(forLoop.release());
+	auto scope = this->ParseScope();
+	return ast::NodeRef(new ast::ForLoop(std::move(decl),
+					     std::move(rangeEnd),
+					     std::move(scope)));
     }
 
-    ast::NodeRef Parser::ParseBlock() {
-	auto block = std::make_unique<ast::Block>();
+    ast::NodeRef Parser::ParseFunctionDef() {
+	this->NextToken();
+	if (m_currentToken.id != Token::IDENT) {
+	    throw std::runtime_error("expected identifier");
+	}
+	std::string fname = m_currentToken.text;
+	m_currentFunction.name = fname;
+	this->NextToken();
+	if (m_currentToken.id != Token::LPRN) {
+	    throw std::runtime_error("expected (");
+	}
+	// TODO: function parameters... !!!
+	this->NextToken();
+	if (m_currentToken.id != Token::RPRN) {
+	    throw std::runtime_error("expected )");
+	}
+	this->NextToken();
+	auto scope = this->ParseScope();
+	return ast::NodeRef(new ast::Function(std::move(scope),
+					      fname, m_currentFunction.name));
+    }
+
+    ast::NodeRef Parser::ParseTopLevelScope() {
+	auto topLevel = std::make_unique<ast::GlobalScope>();
 	do {
 	    switch (m_currentToken.id) {
-	    case Token::FOR:
-		block->AddChild(this->ParseFor());
+	    case Token::DEF:
+		topLevel->AddChild(this->ParseFunctionDef());
 		break;
 
-	    case Token::VAR:
-		// TODO...
-		break;
-
-	    case Token::MUT:
-		// TODO...
-		break;
-
-	    case Token::END:
-		return ast::NodeRef(block.release());
-
-	    default:
-		// IMPORTANT: remove this branch target
-		break;
 	    }
 	    this->NextToken();
 	} while (m_currentToken.id != Token::ENDOFFILE);
-	return ast::NodeRef(block.release());
+	return ast::NodeRef(topLevel.release());
+    }
+    
+    ast::ScopeRef Parser::ParseScope() {
+	bool unreachable = false;
+	ast::ScopeRef scope(new ast::Scope);
+	do {
+	    if (!unreachable) {
+		switch (m_currentToken.id) {
+		case Token::FOR: {
+		    scope->AddChild(this->ParseFor());
+		} break;
+		    
+		case Token::VAR:
+		    // TODO...
+		    break;
+		    
+		case Token::MUT:
+		    // TODO...
+		    break;
+		    
+		case Token::END:
+		    return scope;
+		    
+		case Token::RETURN:
+		    // After seeing a return, no other code in the
+		    // current scope can be executed. Perhaps send
+		    // a warning to the user?
+		    unreachable = true;
+		    scope->AddChild(this->ParseReturn());
+		    break;
+		}
+	    } else {
+		if (m_currentToken.id == Token::END) {
+		    return scope;
+		}
+	    }
+	    this->NextToken();
+	} while (m_currentToken.id != Token::ENDOFFILE);
+	return scope;
     }
     
     ast::NodeRef Parser::Parse(const std::string & sourceFile) {
@@ -108,7 +162,7 @@ namespace coralc {
 	this->NextToken();
 	ast::NodeRef astRoot(nullptr);
 	try {
-	    astRoot = this->ParseBlock();
+	    astRoot = this->ParseTopLevelScope();
 	} catch (const std::exception & ex) {
 	    std::cerr << ex.what() << std::endl;
 	    throw std::runtime_error("Compilation failed");

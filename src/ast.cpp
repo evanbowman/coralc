@@ -12,7 +12,8 @@ namespace coralc {
 
 	Function::Function(ScopeRef scope, const std::string & name,
 			   const std::string & returnType) :
-	    ScopeProvider(std::move(scope)), m_name(name), m_returnType(returnType) {}
+	    ScopeProvider(std::move(scope)), m_name(name), m_returnType(returnType) {
+	}
 	
 	const std::string & Ident::GetName() const {
 	    return m_name;
@@ -42,15 +43,62 @@ namespace coralc {
 
 	// CODE GENERATION
 
+	// I found this helper function in a tutorial from the LLVM page. Creating
+	// a new IRBuilder looks a little suspicious to me, but maybe it's ok. I'll
+	// see about replacing this when I understand the API better.
 	template <typename F>
-	static llvm::AllocaInst * createEntryBlockAlloca(llvm::Function * fn,
+	static llvm::AllocaInst * CreateEntryBlockAlloca(llvm::Function * fn,
 							 F && cb,
 							 llvm::LLVMContext & context,
-							 const std::string & varName) {
+							 const std::string & varName = "") {
 	    llvm::IRBuilder<> tempBuilder(&fn->getEntryBlock(),
 					  fn->getEntryBlock().begin());
 	    return tempBuilder.CreateAlloca(cb(context), 0,
 					    varName.c_str());
+	}
+
+	llvm::Value * MultOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    if (state.parentExprType == "int") {
+		return state.builder.CreateMul(lhs, rhs);
+	    } else {
+		throw std::runtime_error("type cannot be multiplied");
+	    }
+	    return nullptr;
+	}
+
+	llvm::Value * DivOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    if (state.parentExprType == "int") {
+		return state.builder.CreateSDiv(lhs, rhs);
+	    } else {
+		throw std::runtime_error("type cannot be divided");
+	    }
+	    return nullptr;
+	}
+
+	llvm::Value * AddOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    if (state.parentExprType == "int") {
+		return state.builder.CreateAdd(lhs, rhs);
+	    } else {
+		throw std::runtime_error("type cannot be added");
+	    }
+	    return nullptr;
+	}
+
+	llvm::Value * SubOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    if (state.parentExprType == "int") {
+		return state.builder.CreateSub(lhs, rhs);
+	    } else {
+		throw std::runtime_error("type cannot be subtracted");
+	    }
+	    return nullptr;
 	}
 
 	llvm::Value * Void::CodeGen(LLVMState & state) {
@@ -58,42 +106,54 @@ namespace coralc {
 	}
 
 	llvm::Value * Ident::CodeGen(LLVMState & state) {
-	    llvm::Value * value = state.vars[m_name].value;
-	    if (!value) {
-		throw std::runtime_error("reference to non-existent variable " + m_name);
-	    }
+	    llvm::Value * value = state.vars[m_name];
 	    return state.builder.CreateLoad(value, m_name.c_str());
+	}
+
+	llvm::Value * Expr::CodeGen(LLVMState & state) {
+	    state.parentExprType = m_type;
+	    return m_tree->CodeGen(state);
 	}
 	
 	llvm::Value * DeclImmutIntVar::CodeGen(LLVMState & state) {
 	    const auto & varName = dynamic_cast<Ident &>(*m_ident).GetName();
-	    if (state.vars.find(varName) == state.vars.end()) {
-		auto fn = state.builder.GetInsertBlock()->getParent();
-		auto alloca = createEntryBlockAlloca(fn, llvm::Type::getInt32Ty,
-						     state.context, varName);
-		state.builder.CreateStore(m_value->CodeGen(state), alloca);
-		state.vars[varName] = {alloca, false};
-		return state.vars[varName].value;
-	    } else {
-		throw std::runtime_error("declaration of variable "
-					 + varName + " would shadow existing variable");
-	    }
+	    auto fn = state.builder.GetInsertBlock()->getParent();
+	    auto alloca = CreateEntryBlockAlloca(fn, llvm::Type::getInt32Ty,
+						 state.context, varName);
+	    state.builder.CreateStore(m_value->CodeGen(state), alloca);
+	    state.vars[varName] = alloca;
+	    return state.vars[varName];
 	}
 	
 	llvm::Value * Function::CodeGen(LLVMState & state) {
-	    auto funcType = llvm::FunctionType::get(state.builder.getVoidTy(), false);
+	    llvm::FunctionType * funcType = nullptr;
+	    if (m_returnType == "void") {
+		state.currentFnInfo.exitValue = nullptr;
+		funcType = llvm::FunctionType::get(state.builder.getVoidTy(), false);
+	    } else if (m_returnType == "int") {
+		funcType = llvm::FunctionType::get(state.builder.getInt32Ty(), false);
+	    } // other types...
 	    auto funct = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage,
 						m_name, state.modRef.get());
 	    auto fnEntry = llvm::BasicBlock::Create(state.context, "entrypoint", funct);
 	    auto fnExit = llvm::BasicBlock::Create(state.context, "exitpoint", funct);
-	    // TODO: for functions that return values, create an alloca...
-	    state.fnExitPoint = fnExit;
+	    state.currentFnInfo.exitPoint = fnExit;
 	    state.builder.SetInsertPoint(fnEntry);
+	    static const std::string exitVarName = "exitcode";
+	    if (m_returnType == "int") {
+		state.currentFnInfo.exitValue =
+		    CreateEntryBlockAlloca(funct, llvm::Type::getInt32Ty, state.context,
+					   exitVarName);
+	    } // other types...
 	    this->GetScope().CodeGen(state);
-	    // state.builder.CreateBr(state.fnExitPoint);
 	    state.builder.SetInsertPoint(fnExit);
-	    // TODO: if a function returns something, load modified alloca here...
-	    state.builder.CreateRetVoid();
+	    if (m_returnType == "void") {
+		state.builder.CreateRetVoid();
+	    } else if (m_returnType == "int") {
+		auto exitValue = state.builder.CreateLoad(state.currentFnInfo.exitValue,
+							  exitVarName);
+		state.builder.CreateRet(exitValue);
+	    }
 	    return nullptr;
 	}
 	
@@ -101,7 +161,7 @@ namespace coralc {
 	    auto fn = state.builder.GetInsertBlock()->getParent();
 	    m_decl->CodeGen(state);
 	    auto & varName = this->GetIdentName();
-	    auto alloca = state.vars[varName].value;
+	    auto alloca = state.vars[varName];
 	    auto loopBlock = llvm::BasicBlock::Create(state.context, "loop", fn);
 	    auto loopBody = llvm::BasicBlock::Create(state.context, "loopbody", fn);
 	    auto afterBlock = llvm::BasicBlock::Create(state.context, "afterloop", fn);
@@ -124,9 +184,7 @@ namespace coralc {
 	}
 
 	llvm::Value * Return::CodeGen(LLVMState & state) {
-	    throw std::runtime_error("Explicit call to Return::CodeGen");
-	    // This function is to be removed...
-	    return nullptr;
+	    return m_value->CodeGen(state);
 	}
 	
 	llvm::Value * Scope::CodeGen(LLVMState & state) {
@@ -134,7 +192,14 @@ namespace coralc {
 	    for (auto & child : m_children) {
 		Return * ret = dynamic_cast<Return *>(child.get());
 		if (ret) {
-		    state.builder.CreateBr(state.fnExitPoint);
+		    // The parser does not generate nodes for statements after
+		    // a return, so it's safe to assume here that encountering
+		    // a return means the end of a BB
+		    if (state.currentFnInfo.exitValue) {
+			state.builder.CreateStore(ret->CodeGen(state),
+						  state.currentFnInfo.exitValue);
+		    }
+		    state.builder.CreateBr(state.currentFnInfo.exitPoint);
 		    foundRet = true;
 		} else {
 		    child->CodeGen(state);

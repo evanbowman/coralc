@@ -1,12 +1,17 @@
 #pragma once
 
+#include<cassert>
 #include <string>
 #include <utility>
 #include <iostream>
 #include <vector>
+#include <queue>
+#include <stack>
+#include <deque>
 #include <memory>
 #include <ostream>
 #include <functional>
+#include <set>
 #include <array>
 #include "ast.hpp"
 
@@ -23,6 +28,7 @@ namespace coralc {
 	    IN,
 	    DO,
 	    RANGE,
+	    EXPREND,
 	    END,
 	    VAR,
 	    DEF,
@@ -51,13 +57,28 @@ namespace coralc {
 	    std::string name;
 	    std::string returnType;
 	};
+	std::pair<ast::NodeRef, std::string> MakeExprSubTree(std::deque<TokenInfo> &&);
+	std::deque<TokenInfo> ParseExprToRPN();
+	ast::NodeRef ParseDeclVar();
+	ast::NodeRef ParseDeclMutVar();
+	ast::NodeRef ParseExpression();
 	ast::NodeRef ParseTopLevelScope();
 	ast::NodeRef ParseFunctionDef();
 	ast::ScopeRef ParseScope();
 	ast::NodeRef ParseReturn();
 	ast::NodeRef ParseFor();
 	void NextToken();
+	void Expect(const Token, const char *);
 	TokenInfo m_currentToken;
 	FunctionInfo m_currentFunction;
+	// Types are represented within the compiler as strings. I'm
+	// hoping that this will make lookups easier later for user
+	// defined types (classes).
+	struct VarInfo {
+	    std::string type;
+	    bool isMutable;
+	};
+	std::map<std::string, VarInfo> m_varTable;
+	std::set<std::string> * m_localVars;
     };
 }

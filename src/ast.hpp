@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
@@ -19,18 +20,18 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 
 namespace coralc {
-    struct VarInfo {
-	llvm::AllocaInst * value;
-	bool isMutable;
+    struct FunctionInfo {
+	llvm::AllocaInst * exitValue = nullptr;
+	llvm::BasicBlock * exitPoint = nullptr;
     };
-    
     struct LLVMState {
 	llvm::LLVMContext context;
 	llvm::IRBuilder<> builder;
 	std::unique_ptr<llvm::Module> modRef;
 	std::stack<llvm::BasicBlock *> stack;
-        llvm::BasicBlock * fnExitPoint = nullptr;
-	std::map<std::string, VarInfo> vars;
+	std::string parentExprType;
+	FunctionInfo currentFnInfo;
+	std::map<std::string, llvm::AllocaInst *> vars;
 	LLVMState() : builder(context),
 		      modRef(std::make_unique<llvm::Module>("top", context)) {}
     };
@@ -51,9 +52,19 @@ namespace coralc {
 	public:
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	    void AddChild(NodeRef);
+	    const std::vector<NodeRef> & GetChildren() const {
+		return m_children;
+	    }
 	};
 
-	class GlobalScope : public Scope {};
+	struct GlobalScope : public Scope {
+	    virtual llvm::Value * CodeGen(LLVMState & state) override {
+		for (auto & child : this->GetChildren()) {
+		    child->CodeGen(state);
+		}
+		return nullptr;
+	    }
+	};
 
 	using ScopeRef = std::unique_ptr<Scope>;
 	
@@ -66,11 +77,50 @@ namespace coralc {
 	    }
 	};
 
+	class Expr : public Node {
+	    std::string m_type;
+	    NodeRef m_tree;
+	public:
+	    Expr(const std::string & type, NodeRef tree) :
+		m_type(type), m_tree(std::move(tree)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	    const std::string & GetType() const {
+		return m_type;
+	    }
+	};
+
 	class Return : public Node {
 	    friend class Scope;
 	    NodeRef m_value;
 	public:
 	    Return(NodeRef);
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	class BinOp : public Node {
+	protected:
+	    NodeRef m_lhs, m_rhs;
+	public:
+	    BinOp(NodeRef lhs, NodeRef rhs) : m_lhs(std::move(lhs)), m_rhs(std::move(rhs)) {}
+	};
+
+	struct MultOp : public BinOp {
+	    MultOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	struct DivOp : public BinOp {
+	    DivOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	struct AddOp : public BinOp {
+	    AddOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	struct SubOp : public BinOp {
+	    SubOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 

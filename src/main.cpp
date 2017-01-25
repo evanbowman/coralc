@@ -16,7 +16,7 @@ namespace coralc {
 	    std::cerr << ex.what() << std::endl;
 	    exit(EXIT_FAILURE);
 	}
-	state.modRef->dump();
+	//state.modRef->dump();
 	std::string err;
 	auto output = fname + ".bc";
 	std::error_code ec;
@@ -44,7 +44,7 @@ int main(int argc, char ** argv) {
 	    coralc::ast::NodeRef root = parser.Parse(buffer.str());
 	    coralc::GenerateCode(root, argv[1]);
 	} catch (const std::exception & ex) {
-	    std::cerr << ex.what() << " for file" << argv[1] << std::endl;
+	    std::cerr << ex.what() << " for file " << argv[1] << std::endl;
 	    return EXIT_FAILURE;
 	}
     } else {

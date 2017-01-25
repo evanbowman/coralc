@@ -8,12 +8,16 @@ extern "C" {
     void * yy_scan_string(const char *);
 
     void yy_free_current_buffer(void);
+
+    size_t get_linum(void);
 }
 
 namespace coralc {
     static inline void Error(const std::string & err) {
 	// TODO: Line and column info + context!!!
-	throw std::runtime_error("Error: " + err);
+	std::string errMsg = "Error [line " +
+	    std::to_string(get_linum()) + "]:\n\t" + err + "\n";
+	throw std::runtime_error(errMsg);
     }
     
     void Parser::Expect(const Token tok, const char * str) {
@@ -29,7 +33,7 @@ namespace coralc {
 	// Shunting Yard algorithm
 	std::stack<TokenInfo> operatorStack;
 	std::deque<TokenInfo> outputQueue;
-	const auto prec =
+	const auto precedence =
 	    [](Token t) {
 		switch (t) {
 		case Token::MULTIPLY: return 3;
@@ -48,13 +52,14 @@ namespace coralc {
 		return outputQueue;
 
 	    case Token::ASSIGN:
-		Error("assignment not allowed here");
+		Error("Assignment not allowed here");
 
 	    case Token::END:
 	    case Token::ENDOFFILE:
-		Error("expected ;");
+		Error("Expected ;");
 
 	    case Token::INTEGER:
+	    case Token::FLOAT:
 	    case Token::IDENT:
 		outputQueue.push_back(m_currentToken);
 		break;
@@ -63,8 +68,8 @@ namespace coralc {
 	    case Token::SUBTRACT:
 	    case Token::MULTIPLY:
 	    case Token::DIVIDE:
-		while (!operatorStack.empty() && prec(operatorStack.top().id)
-		       >= prec(m_currentToken.id)) {
+		while (!operatorStack.empty() && precedence(operatorStack.top().id)
+		       >= precedence(m_currentToken.id)) {
 		    outputQueue.push_back(operatorStack.top());
 		    operatorStack.pop();
 		}
@@ -77,71 +82,84 @@ namespace coralc {
 
     std::pair<ast::NodeRef, std::string>
     Parser::MakeExprSubTree(std::deque<Parser::TokenInfo> && exprQueueRPN) {
-	std::stack<ast::NodeRef> valueStack;
+	struct Value {
+	    ast::NodeRef node;
+	    std::string type;
+	};
+	auto OperandTypeError = [](const std::string & t1,
+				   const std::string & t2) {
+				    Error("Operand type mismatch: " + t1 + " and " + t2);
+				};
+	std::stack<Value> valueStack;
+	auto GetValueStackTopTwo = [&valueStack, OperandTypeError]()
+	    -> std::pair<Value, Value> {
+	    auto rhs = std::move(valueStack.top());
+	    valueStack.pop();
+	    auto lhs = std::move(valueStack.top());
+	    valueStack.pop();
+	    if (lhs.type != rhs.type) {
+		OperandTypeError(lhs.type, rhs.type);
+	    }
+	    return {std::move(lhs), std::move(rhs)};
+	};
 	std::string exprType = "";
 	while (!exprQueueRPN.empty()) {
 	    auto & curr = exprQueueRPN.front();
 	    switch (curr.id) {
 	    case Token::INTEGER:
-		if (exprType == "") {
-		    exprType = "int";
-		} else if (exprType != "int") {
-		    Error("type misatch in expression, int and " + exprType);
-		}
-		valueStack.push(ast::NodeRef(new ast::Integer(std::stoi(curr.text))));
+		valueStack.push({
+			ast::NodeRef(new ast::Integer(std::stoi(curr.text))),
+			"int"
+		    });
+		break;
+
+	    case Token::FLOAT:
+		valueStack.push({
+			ast::NodeRef(new ast::Float(std::stof(curr.text))),
+			"float"
+		    });
 		break;
 		
 	    case Token::IDENT:
 		if (m_varTable.find(curr.text) == m_varTable.end()) {
-		    Error("attempt to reference nonexistent variable " + curr.text);
+		    Error("Attempt to reference nonexistent variable " + curr.text);
 		}
-		if (exprType == "") {
-		    exprType = m_varTable[curr.text].type;
-		} else if (exprType != m_varTable[curr.text].type) {
-		    Error("type mismatch in expression, " +
-			  m_varTable[curr.text].type + " and" + exprType);
-		}
-		valueStack.push(ast::NodeRef(new ast::Ident(curr.text)));
+		valueStack.push({
+			ast::NodeRef(new ast::Ident(curr.text)),
+			m_varTable[curr.text].type
+		    });
 		break;
 
 	    case Token::ADD: {
-		auto rhs = std::move(valueStack.top());
-		valueStack.pop();
-		auto lhs = std::move(valueStack.top());
-		valueStack.pop();
+		auto operands = GetValueStackTopTwo();
 		auto addOpRef =
-		    std::make_unique<ast::AddOp>(std::move(lhs), std::move(rhs));
-		valueStack.push(ast::NodeRef(addOpRef.release()));
+		    std::make_unique<ast::AddOp>(std::move(operands.first.node),
+						 std::move(operands.second.node));
+		valueStack.push({ast::NodeRef(addOpRef.release()), operands.first.type});
 	    } break;
 
 	    case Token::SUBTRACT: {
-		auto rhs = std::move(valueStack.top());
-		valueStack.pop();
-		auto lhs = std::move(valueStack.top());
-		valueStack.pop();
+		auto operands = GetValueStackTopTwo();
 		auto subOpRef =
-		    std::make_unique<ast::SubOp>(std::move(lhs), std::move(rhs));
-		valueStack.push(ast::NodeRef(subOpRef.release()));
+		    std::make_unique<ast::SubOp>(std::move(operands.first.node),
+						 std::move(operands.second.node));
+		valueStack.push({ast::NodeRef(subOpRef.release()), operands.first.type});
 	    } break;
 
 	    case Token::MULTIPLY: {
-		auto rhs = std::move(valueStack.top());
-		valueStack.pop();
-		auto lhs = std::move(valueStack.top());
-		valueStack.pop();
+		auto operands = GetValueStackTopTwo();
 		auto multOpRef =
-		    std::make_unique<ast::MultOp>(std::move(lhs), std::move(rhs));
-		valueStack.push(ast::NodeRef(multOpRef.release()));
+		    std::make_unique<ast::MultOp>(std::move(operands.first.node),
+						  std::move(operands.second.node));
+		valueStack.push({ast::NodeRef(multOpRef.release()), operands.first.type});
 	    } break;
 
 	    case Token::DIVIDE: {
-		auto rhs = std::move(valueStack.top());
-		valueStack.pop();
-		auto lhs = std::move(valueStack.top());
-		valueStack.pop();
+		auto operands = GetValueStackTopTwo();
 		auto divOpRef =
-		    std::make_unique<ast::DivOp>(std::move(lhs), std::move(rhs));
-		valueStack.push(ast::NodeRef(divOpRef.release()));
+		    std::make_unique<ast::DivOp>(std::move(operands.first.node),
+						 std::move(operands.second.node));
+		valueStack.push({ast::NodeRef(divOpRef.release()), operands.first.type});
 	    } break;
 	    }
 	    exprQueueRPN.pop_front();
@@ -151,7 +169,7 @@ namespace coralc {
 	} else if (valueStack.size() != 1) {
 	    throw std::runtime_error("__Internal error: failed to build expression tree");
 	}
-	return {std::move(valueStack.top()), exprType};
+	return {std::move(valueStack.top().node), valueStack.top().type};
     }
 
     ast::NodeRef Parser::ParseExpression() {
@@ -170,7 +188,7 @@ namespace coralc {
 	    m_currentFunction.returnType = expr->GetType();
 	} else {
 	    if (m_currentFunction.returnType != expr->GetType()) {
-		const std::string errMsg = "return type mismatch in function " +
+		const std::string errMsg = "Return type mismatch in function " +
 		    m_currentFunction.name + ": " + expr->GetType() + " and " +
 		    m_currentFunction.returnType;
 		Error(errMsg);
@@ -187,14 +205,15 @@ namespace coralc {
 	ast::NodeRef cmpLoopVar(nullptr);
 	ast::NodeRef rangeStart(nullptr);
 	ast::NodeRef rangeEnd(nullptr);
-	this->Expect(Token::IDENT, "expected identifier");
+	this->Expect(Token::IDENT, "Expected identifier");
 	std::string loopVarName = m_currentToken.text;
 	ast::NodeRef declLoopVar(new ast::Ident(loopVarName));
 	if (m_varTable.find(loopVarName) != m_varTable.end()) {
-	    Error("declaration of " + loopVarName + " would shadow existing variable");
+	     Error("Declaration of " + loopVarName + " would create a shadowing condition");
 	}
 	m_varTable[loopVarName].type = "int";
-	this->Expect(Token::IN, "expected in");
+	m_varTable[loopVarName].isMutable = false;
+	this->Expect(Token::IN, "Expected in");
 	this->NextToken();
 	switch (m_currentToken.id) {
 	case Token::INTEGER:
@@ -206,9 +225,9 @@ namespace coralc {
 	    break;
 
 	default:
-	    Error("expected integer or identifier");
+	    Error("Expected integer or identifier");
 	}
-	this->Expect(Token::RANGE, "expected ..");
+	this->Expect(Token::RANGE, "Expected ..");
 	this->NextToken();
 	switch (m_currentToken.id) {
 	case Token::INTEGER:
@@ -220,11 +239,11 @@ namespace coralc {
 	    break;
 
 	default:
-	    Error("expected integer or identifier");
+	    Error("Expected integer or identifier");
 	}
-        auto decl = std::make_unique<ast::DeclImmutIntVar>(std::move(declLoopVar),
-							   std::move(rangeStart));
-	this->Expect(Token::DO, "expected do");
+        auto decl = std::make_unique<ast::DeclIntVar>(std::move(declLoopVar),
+						      std::move(rangeStart));
+	this->Expect(Token::DO, "Expected do");
 	this->NextToken();
 	auto scope = this->ParseScope();
 	m_varTable.erase(loopVarName);
@@ -235,12 +254,12 @@ namespace coralc {
 
     ast::NodeRef Parser::ParseFunctionDef() {
 	m_currentFunction.returnType = "";
-	this->Expect(Token::IDENT, "expected identifier");
+	this->Expect(Token::IDENT, "Expected identifier");
 	std::string fname = m_currentToken.text;
 	m_currentFunction.name = fname;
-	this->Expect(Token::LPRN, "expected (");
+	this->Expect(Token::LPRN, "Expected (");
 	// TODO: function parameters... !!!
-	this->Expect(Token::RPRN, "expected )");
+	this->Expect(Token::RPRN, "Expected )");
 	this->NextToken();
 	auto scope = this->ParseScope();
 	const bool hasExplicitReturnStatement = m_currentFunction.returnType != "";
@@ -254,7 +273,7 @@ namespace coralc {
 			    ast::NodeRef(new ast::Return(ast::NodeRef(new ast::Void)));
 			scope->AddChild(std::move(implicitVoidRet));
 		    } else {
-			Error("missing return in non-void function");
+			Error("Missing return in non-void function");
 		    }
 		}
 	    }
@@ -275,45 +294,42 @@ namespace coralc {
 		break;
 
 	    case Token::END:
-		Error("unexpected end");
+		Error("Unexpected end");
 	    }
 	    this->NextToken();
 	} while (m_currentToken.id != Token::ENDOFFILE);
 	return ast::NodeRef(topLevel.release());
     }
 
-    ast::NodeRef Parser::ParseDeclVar() {
+    ast::NodeRef Parser::ParseDeclVar(const bool mut) {
 	this->Expect(Token::IDENT, "expected identifier after var");
 	std::string identName = m_currentToken.text;
 	auto ident = ast::NodeRef(new ast::Ident(identName));
-	m_localVars->insert(identName);
 	if (m_varTable.find(identName) != m_varTable.end()) {
-	    Error("re-declaration of " + identName);
+	    if (m_localVars->find(identName) != m_localVars->end()) {
+		Error("Re-declaration of " + identName);
+	    } else {
+		Error("Declaration of " + identName + " would create a shadowing condition");
+	    }
 	}
+	m_localVars->insert(identName);
 	this->Expect(Token::ASSIGN, "expected =");
 	this->NextToken();
 	auto expr = this->ParseExpression();
 	auto & exprType = dynamic_cast<ast::Expr *>(expr.get())->GetType();
 	if (exprType == "int") {
 	    m_varTable[identName].type = "int";
-	    return ast::NodeRef(new ast::DeclImmutIntVar(std::move(ident),
-							 std::move(expr)));
+	    m_varTable[identName].isMutable = mut;
+	    return ast::NodeRef(new ast::DeclIntVar(std::move(ident),
+						    std::move(expr)));
+	} else if (exprType == "float") {
+	    m_varTable[identName].type = "float";
+	    m_varTable[identName].isMutable = mut;
+	    return ast::NodeRef(new ast::DeclFloatVar(std::move(ident),
+						      std::move(expr)));
 	} else {
-	    Error("non-int types aren't supported yet!");
+	    Error("Non-int types aren't supported yet!");
 	}
-    }
-
-    ast::NodeRef Parser::ParseDeclMutVar() {
-	this->Expect(Token::VAR, "expected var after mut");
-	this->Expect(Token::IDENT, "expected identifier after var");
-	std::string identName = m_currentToken.text;
-	if (m_varTable.find(identName) != m_varTable.end()) {
-	    Error("declaration of " + identName + " would shadow existing variable");
-	}
-	this->Expect(Token::ASSIGN, "expected =");
-	this->NextToken();
-	auto expr = this->ParseExpression();
-	Error("parser incomplete for mutable variables...");
     }
     
     ast::ScopeRef Parser::ParseScope() {
@@ -331,18 +347,19 @@ namespace coralc {
 		} break;
 		    
 		case Token::VAR:
-		    scope->AddChild(this->ParseDeclVar());
+		    scope->AddChild(this->ParseDeclVar(false));
 		    break;
 		    
 		case Token::MUT:
-		    this->ParseDeclMutVar();
+		    this->Expect(Token::VAR, "Expected var");
+		    scope->AddChild(this->ParseDeclVar(false));
 		    break;
 		    
 		case Token::END:
 		    goto CLEANUPSCOPE;
 
 		case Token::ENDOFFILE:
-		    Error("expected end");
+		    Error("Expected end");
 		    
 		case Token::RETURN:
 		    // After seeing a return, no other code in the

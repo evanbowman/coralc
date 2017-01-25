@@ -79,10 +79,10 @@ namespace coralc {
 
 	class Expr : public Node {
 	    std::string m_type;
-	    NodeRef m_tree;
+	    NodeRef m_exprSubTree;
 	public:
 	    Expr(const std::string & type, NodeRef tree) :
-		m_type(type), m_tree(std::move(tree)) {}
+		m_type(type), m_exprSubTree(std::move(tree)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	    const std::string & GetType() const {
 		return m_type;
@@ -141,16 +141,43 @@ namespace coralc {
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
-	class DeclImmutIntVar : public Node {
+	class Ident : public Node {
+	    std::string m_name;
+	public:
+	    Ident(const std::string &);
+	    const std::string & GetName() const;
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+	
+	class DeclVar : public Node {
+	protected:
 	    NodeRef m_ident, m_value;
 	public:
-	    const std::string & GetIdentName() const; 
-	    DeclImmutIntVar(NodeRef, NodeRef);
+	    const std::string & GetIdentName() const {
+		return dynamic_cast<Ident &>(*m_ident).GetName();
+	    }
+	    DeclVar(NodeRef ident, NodeRef value);
+	};
+	
+        struct DeclIntVar : public DeclVar {
+	    DeclIntVar(NodeRef, NodeRef);
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	struct DeclFloatVar : public DeclVar {
+	    DeclFloatVar(NodeRef, NodeRef);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
         struct Void : public Node {
 	public:
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	class Float : public Node {
+	    float m_value;
+	public:
+	    Float(const float);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 	
@@ -159,14 +186,6 @@ namespace coralc {
 	public:
 	    Integer(const int);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
-	};
-
-	class Ident : public Node {
-	    std::string m_name;
-	public:
-	    Ident(const std::string &);
-	    const std::string & GetName() const;
-	    virtual llvm::Value * CodeGen(LLVMState &) override;
-	};
+	};	
     }
 }

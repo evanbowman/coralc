@@ -13,6 +13,7 @@
 #include <functional>
 #include <set>
 #include <array>
+#include <exception>
 #include "ast.hpp"
 
 namespace coralc {
@@ -40,12 +41,15 @@ namespace coralc {
 	    SUBTRACT,
 	    MULTIPLY,
 	    DIVIDE,
+	    TRUE,
+	    FALSE,
 	    RETURN,
 	    MUT,
 	    HASH,
 	    LPRN,
 	    RPRN,
 	    STRING,
+	    FLOAT,
 	    INTEGER,
 	    IDENT
 	};
@@ -59,8 +63,7 @@ namespace coralc {
 	};
 	std::pair<ast::NodeRef, std::string> MakeExprSubTree(std::deque<TokenInfo> &&);
 	std::deque<TokenInfo> ParseExprToRPN();
-	ast::NodeRef ParseDeclVar();
-	ast::NodeRef ParseDeclMutVar();
+	ast::NodeRef ParseDeclVar(const bool);
 	ast::NodeRef ParseExpression();
 	ast::NodeRef ParseTopLevelScope();
 	ast::NodeRef ParseFunctionDef();

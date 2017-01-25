@@ -23,6 +23,8 @@ namespace coralc {
 	
 	Integer::Integer(const int value) : m_value(value) {}
 
+	Float::Float(const float value) : m_value(value) {}
+	
 	ForLoop::ForLoop(NodeRef decl, NodeRef end, ScopeRef scope) :
 	    ScopeProvider(std::move(scope)),
 	    m_decl(std::move(decl)),
@@ -30,17 +32,19 @@ namespace coralc {
 	}
 
 	const std::string & ForLoop::GetIdentName() const {
-	    return dynamic_cast<DeclImmutIntVar &>(*m_decl).GetIdentName();
+	    return dynamic_cast<DeclIntVar &>(*m_decl).GetIdentName();
 	}
 
-	DeclImmutIntVar::DeclImmutIntVar(NodeRef ident, NodeRef value) :
+	DeclVar::DeclVar(NodeRef ident, NodeRef value) :
 	    m_ident(std::move(ident)),
 	    m_value(std::move(value)) {}
+	
+	DeclIntVar::DeclIntVar(NodeRef ident, NodeRef value) :
+	    DeclVar(std::move(ident), std::move(value)) {}
 
-	const std::string & DeclImmutIntVar::GetIdentName() const {
-	    return dynamic_cast<Ident &>(*m_ident).GetName();
-	}
-
+	DeclFloatVar::DeclFloatVar(NodeRef ident, NodeRef value) :
+	    DeclVar(std::move(ident), std::move(value)) {}
+	
 	// CODE GENERATION
 
 	// I found this helper function in a tutorial from the LLVM page. Creating
@@ -62,6 +66,8 @@ namespace coralc {
 	    auto rhs = m_rhs->CodeGen(state);
 	    if (state.parentExprType == "int") {
 		return state.builder.CreateMul(lhs, rhs);
+	    } else if (state.parentExprType == "float") {
+		return state.builder.CreateFMul(lhs, rhs);
 	    } else {
 		throw std::runtime_error("type cannot be multiplied");
 	    }
@@ -73,6 +79,8 @@ namespace coralc {
 	    auto rhs = m_rhs->CodeGen(state);
 	    if (state.parentExprType == "int") {
 		return state.builder.CreateSDiv(lhs, rhs);
+	    } else if (state.parentExprType == "float") {
+		return state.builder.CreateFDiv(lhs, rhs);
 	    } else {
 		throw std::runtime_error("type cannot be divided");
 	    }
@@ -84,6 +92,8 @@ namespace coralc {
 	    auto rhs = m_rhs->CodeGen(state);
 	    if (state.parentExprType == "int") {
 		return state.builder.CreateAdd(lhs, rhs);
+	    } else if (state.parentExprType == "float") {
+		return state.builder.CreateFAdd(lhs, rhs);
 	    } else {
 		throw std::runtime_error("type cannot be added");
 	    }
@@ -95,6 +105,8 @@ namespace coralc {
 	    auto rhs = m_rhs->CodeGen(state);
 	    if (state.parentExprType == "int") {
 		return state.builder.CreateSub(lhs, rhs);
+	    } else if (state.parentExprType == "float") {
+		return state.builder.CreateFSub(lhs, rhs);
 	    } else {
 		throw std::runtime_error("type cannot be subtracted");
 	    }
@@ -112,13 +124,23 @@ namespace coralc {
 
 	llvm::Value * Expr::CodeGen(LLVMState & state) {
 	    state.parentExprType = m_type;
-	    return m_tree->CodeGen(state);
+	    return m_exprSubTree->CodeGen(state);
 	}
 	
-	llvm::Value * DeclImmutIntVar::CodeGen(LLVMState & state) {
+	llvm::Value * DeclIntVar::CodeGen(LLVMState & state) {
 	    const auto & varName = dynamic_cast<Ident &>(*m_ident).GetName();
 	    auto fn = state.builder.GetInsertBlock()->getParent();
 	    auto alloca = CreateEntryBlockAlloca(fn, llvm::Type::getInt32Ty,
+						 state.context, varName);
+	    state.builder.CreateStore(m_value->CodeGen(state), alloca);
+	    state.vars[varName] = alloca;
+	    return state.vars[varName];
+	}
+
+	llvm::Value * DeclFloatVar::CodeGen(LLVMState & state) {
+	    const auto & varName = dynamic_cast<Ident &>(*m_ident).GetName();
+	    auto fn = state.builder.GetInsertBlock()->getParent();
+	    auto alloca = CreateEntryBlockAlloca(fn, llvm::Type::getFloatTy,
 						 state.context, varName);
 	    state.builder.CreateStore(m_value->CodeGen(state), alloca);
 	    state.vars[varName] = alloca;
@@ -132,7 +154,11 @@ namespace coralc {
 		funcType = llvm::FunctionType::get(state.builder.getVoidTy(), false);
 	    } else if (m_returnType == "int") {
 		funcType = llvm::FunctionType::get(state.builder.getInt32Ty(), false);
-	    } // other types...
+	    } else if (m_returnType == "float") {
+		funcType = llvm::FunctionType::get(state.builder.getFloatTy(), false);
+	    } else {
+		throw std::runtime_error("functions of " + m_returnType + "are not supported");
+	    }
 	    auto funct = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage,
 						m_name, state.modRef.get());
 	    auto fnEntry = llvm::BasicBlock::Create(state.context, "entrypoint", funct);
@@ -144,12 +170,16 @@ namespace coralc {
 		state.currentFnInfo.exitValue =
 		    CreateEntryBlockAlloca(funct, llvm::Type::getInt32Ty, state.context,
 					   exitVarName);
-	    } // other types...
+	    } else if (m_returnType == "float") {
+		state.currentFnInfo.exitValue =
+		    CreateEntryBlockAlloca(funct, llvm::Type::getFloatTy, state.context,
+					   exitVarName);
+	    }
 	    this->GetScope().CodeGen(state);
 	    state.builder.SetInsertPoint(fnExit);
 	    if (m_returnType == "void") {
 		state.builder.CreateRetVoid();
-	    } else if (m_returnType == "int") {
+	    } else if (m_returnType == "int" || m_returnType == "float") {
 		auto exitValue = state.builder.CreateLoad(state.currentFnInfo.exitValue,
 							  exitVarName);
 		state.builder.CreateRet(exitValue);
@@ -214,6 +244,10 @@ namespace coralc {
 	llvm::Value * Integer::CodeGen(LLVMState & state) {
 	    uint64_t longVal = static_cast<uint64_t>(m_value);
 	    return llvm::ConstantInt::get(state.context, llvm::APInt(32, longVal));
+	}
+
+	llvm::Value * Float::CodeGen(LLVMState & state) {
+	    return llvm::ConstantFP::get(state.context, llvm::APFloat(m_value));
 	}
     }
 }

@@ -12,13 +12,15 @@ namespace coralc {
 
 	Function::Function(ScopeRef scope, const std::string & name,
 			   const std::string & returnType) :
-	    ScopeProvider(std::move(scope)), m_name(name), m_returnType(returnType) {
-	}
+	    ScopeProvider(std::move(scope)), m_name(name),
+	    m_returnType(returnType) {}
 	
 	const std::string & Ident::GetName() const {
 	    return m_name;
 	}
 
+	Boolean::Boolean(const bool value) : m_value(value) {}
+	
 	Return::Return(NodeRef value) : m_value(std::move(value)) {}
 	
 	Integer::Integer(const int value) : m_value(value) {}
@@ -42,14 +44,18 @@ namespace coralc {
 	DeclIntVar::DeclIntVar(NodeRef ident, NodeRef value) :
 	    DeclVar(std::move(ident), std::move(value)) {}
 
+	DeclBooleanVar::DeclBooleanVar(NodeRef ident, NodeRef value) :
+	    DeclVar(std::move(ident), std::move(value)) {}
+	
 	DeclFloatVar::DeclFloatVar(NodeRef ident, NodeRef value) :
 	    DeclVar(std::move(ident), std::move(value)) {}
 	
 	// CODE GENERATION
 
-	// I found this helper function in a tutorial from the LLVM page. Creating
-	// a new IRBuilder looks a little suspicious to me, but maybe it's ok. I'll
-	// see about replacing this when I understand the API better.
+	// I found this helper function in a tutorial from the LLVM site. Creating
+	// a new IRBuilder looks a little suspicious to me, but I read somewhere in
+	// the LLVM mailing list that doing allocations early is a good idea, so I'll
+	// keep using it.
 	template <typename F>
 	static llvm::AllocaInst * CreateEntryBlockAlloca(llvm::Function * fn,
 							 F && cb,
@@ -85,6 +91,24 @@ namespace coralc {
 		throw std::runtime_error("type cannot be divided");
 	    }
 	    return nullptr;
+	}
+
+	llvm::Value * EqualityOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    llvm::Value * ret = nullptr;
+	    if (state.parentExprType == "int") {
+		ret = state.builder.CreateICmpEQ(lhs, rhs, "equality test");
+	    } else if (state.parentExprType == "float") {
+	        ret = state.builder.CreateFCmpOEQ(lhs, rhs, "equality test");
+	    } else if (state.parentExprType == "bool") {
+	        ret = state.builder.CreateICmpEQ(lhs, rhs, "equality test");
+	    } else {
+		throw std::runtime_error("type cannot be compared");
+	    }
+	    // I've had trouble with the llvm assembler and single bit bools,
+	    // so I've been casting them to 8 bit integers.
+	    return state.builder.CreateIntCast(ret, llvm::Type::getInt8Ty(state.context), true);
 	}
 
 	llvm::Value * AddOp::CodeGen(LLVMState & state) {
@@ -146,6 +170,16 @@ namespace coralc {
 	    state.vars[varName] = alloca;
 	    return state.vars[varName];
 	}
+
+	llvm::Value * DeclBooleanVar::CodeGen(LLVMState & state) {
+	    const auto & varName = dynamic_cast<Ident &>(*m_ident).GetName();
+	    auto fn = state.builder.GetInsertBlock()->getParent();
+	    auto alloca = CreateEntryBlockAlloca(fn, llvm::Type::getInt8Ty,
+						 state.context, varName);
+	    state.builder.CreateStore(m_value->CodeGen(state), alloca);
+	    state.vars[varName] = alloca;
+	    return state.vars[varName];
+	}
 	
 	llvm::Value * Function::CodeGen(LLVMState & state) {
 	    llvm::FunctionType * funcType = nullptr;
@@ -156,6 +190,8 @@ namespace coralc {
 		funcType = llvm::FunctionType::get(state.builder.getInt32Ty(), false);
 	    } else if (m_returnType == "float") {
 		funcType = llvm::FunctionType::get(state.builder.getFloatTy(), false);
+	    } else if (m_returnType == "bool") {
+		funcType = llvm::FunctionType::get(state.builder.getInt8Ty(), false);
 	    } else {
 		throw std::runtime_error("functions of " + m_returnType + "are not supported");
 	    }
@@ -174,12 +210,16 @@ namespace coralc {
 		state.currentFnInfo.exitValue =
 		    CreateEntryBlockAlloca(funct, llvm::Type::getFloatTy, state.context,
 					   exitVarName);
+	    } else if (m_returnType == "bool") {
+		state.currentFnInfo.exitValue =
+		    CreateEntryBlockAlloca(funct, llvm::Type::getInt8Ty, state.context,
+					   exitVarName);
 	    }
 	    this->GetScope().CodeGen(state);
 	    state.builder.SetInsertPoint(fnExit);
 	    if (m_returnType == "void") {
 		state.builder.CreateRetVoid();
-	    } else if (m_returnType == "int" || m_returnType == "float") {
+	    } else if (m_returnType == "int" || m_returnType == "float" || m_returnType == "bool") {
 		auto exitValue = state.builder.CreateLoad(state.currentFnInfo.exitValue,
 							  exitVarName);
 		state.builder.CreateRet(exitValue);
@@ -244,6 +284,10 @@ namespace coralc {
 	llvm::Value * Integer::CodeGen(LLVMState & state) {
 	    uint64_t longVal = static_cast<uint64_t>(m_value);
 	    return llvm::ConstantInt::get(state.context, llvm::APInt(32, longVal));
+	}
+
+	llvm::Value * Boolean::CodeGen(LLVMState & state) {
+	    return llvm::ConstantInt::get(state.context, llvm::APInt(8, m_value));
 	}
 
 	llvm::Value * Float::CodeGen(LLVMState & state) {

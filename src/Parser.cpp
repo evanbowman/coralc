@@ -40,6 +40,7 @@ namespace coralc {
 		case Token::DIVIDE: return 3;
 		case Token::ADD: return 2;
 		case Token::SUBTRACT: return 2;
+		case Token::EQUALITY: return 1;
 		}
 	    };
 	do {
@@ -61,6 +62,7 @@ namespace coralc {
 	    case Token::INTEGER:
 	    case Token::FLOAT:
 	    case Token::IDENT:
+	    case Token::BOOLEAN:
 		outputQueue.push_back(m_currentToken);
 		break;
 		
@@ -68,6 +70,7 @@ namespace coralc {
 	    case Token::SUBTRACT:
 	    case Token::MULTIPLY:
 	    case Token::DIVIDE:
+	    case Token::EQUALITY:
 		while (!operatorStack.empty() && precedence(operatorStack.top().id)
 		       >= precedence(m_currentToken.id)) {
 		    outputQueue.push_back(operatorStack.top());
@@ -82,6 +85,8 @@ namespace coralc {
 
     std::pair<ast::NodeRef, std::string>
     Parser::MakeExprSubTree(std::deque<Parser::TokenInfo> && exprQueueRPN) {
+	// This function takes an RPN formatted expression and uses
+	// it to construct a syntax subtree representing that expression.
 	struct Value {
 	    ast::NodeRef node;
 	    std::string type;
@@ -106,6 +111,13 @@ namespace coralc {
 	while (!exprQueueRPN.empty()) {
 	    auto & curr = exprQueueRPN.front();
 	    switch (curr.id) {
+	    case Token::BOOLEAN:
+		valueStack.push({
+			ast::NodeRef(new ast::Boolean(curr.text == "true")),
+			"bool"
+		    });
+		break;
+		
 	    case Token::INTEGER:
 		valueStack.push({
 			ast::NodeRef(new ast::Integer(std::stoi(curr.text))),
@@ -130,8 +142,19 @@ namespace coralc {
 		    });
 		break;
 
+	    case Token::EQUALITY: {
+		auto operands = GetValueStackTopTwo();
+		auto equalityOpRef =
+		    std::make_unique<ast::EqualityOp>(std::move(operands.first.node),
+						      std::move(operands.second.node));
+		valueStack.push({ast::NodeRef(equalityOpRef.release()), "bool"});
+	    } break;
+
 	    case Token::ADD: {
 		auto operands = GetValueStackTopTwo();
+		if (operands.first.type == "bool" || operands.second.type == "bool") {
+		    Error("Type bool cannot be used for arithmetic operations");
+		}
 		auto addOpRef =
 		    std::make_unique<ast::AddOp>(std::move(operands.first.node),
 						 std::move(operands.second.node));
@@ -140,6 +163,9 @@ namespace coralc {
 
 	    case Token::SUBTRACT: {
 		auto operands = GetValueStackTopTwo();
+		if (operands.first.type == "bool" || operands.second.type == "bool") {
+		    Error("Type bool cannot be used for arithmetic operations");
+		}
 		auto subOpRef =
 		    std::make_unique<ast::SubOp>(std::move(operands.first.node),
 						 std::move(operands.second.node));
@@ -293,6 +319,10 @@ namespace coralc {
 		topLevel->AddChild(this->ParseFunctionDef());
 		break;
 
+	    case Token::VAR:
+	    case Token::MUT:
+		Error("Global variables are not allowed");
+
 	    case Token::END:
 		Error("Unexpected end");
 	    }
@@ -302,7 +332,7 @@ namespace coralc {
     }
 
     ast::NodeRef Parser::ParseDeclVar(const bool mut) {
-	this->Expect(Token::IDENT, "expected identifier after var");
+	this->Expect(Token::IDENT, "Expected identifier after var");
 	std::string identName = m_currentToken.text;
 	auto ident = ast::NodeRef(new ast::Ident(identName));
 	if (m_varTable.find(identName) != m_varTable.end()) {
@@ -313,7 +343,7 @@ namespace coralc {
 	    }
 	}
 	m_localVars->insert(identName);
-	this->Expect(Token::ASSIGN, "expected =");
+	this->Expect(Token::ASSIGN, "Expected =");
 	this->NextToken();
 	auto expr = this->ParseExpression();
 	auto & exprType = dynamic_cast<ast::Expr *>(expr.get())->GetType();
@@ -327,8 +357,13 @@ namespace coralc {
 	    m_varTable[identName].isMutable = mut;
 	    return ast::NodeRef(new ast::DeclFloatVar(std::move(ident),
 						      std::move(expr)));
-	} else {
-	    Error("Non-int types aren't supported yet!");
+	} else if (exprType == "bool") {
+	    m_varTable[identName].type = "bool";
+	    m_varTable[identName].isMutable = mut;
+	    return ast::NodeRef(new ast::DeclBooleanVar(std::move(ident),
+							std::move(expr)));
+	} else if (exprType == "void") {
+	    Error("Attempt to bind void to an l-value");
 	}
     }
     
@@ -371,6 +406,13 @@ namespace coralc {
 			scope->AddChild(std::move(ret));
 		    }
 		    break;
+
+		default: {
+		    auto expression = this->ParseExpression();
+		    if (dynamic_cast<ast::Expr *>(expression.get())->GetType() != "void") {
+			scope->AddChild(this->ParseExpression());
+		    }
+		} break;
 		}
 	    } else {
 		if (m_currentToken.id == Token::END) {

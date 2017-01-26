@@ -124,6 +124,11 @@ namespace coralc {
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
+	struct EqualityOp : public BinOp {
+	    EqualityOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
 	class Function : public Node, public ScopeProvider {
 	    std::string m_name;
 	    std::string m_returnType;
@@ -169,6 +174,11 @@ namespace coralc {
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
+	struct DeclBooleanVar : public DeclVar {
+	    DeclBooleanVar(NodeRef, NodeRef);
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
         struct Void : public Node {
 	public:
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
@@ -178,6 +188,13 @@ namespace coralc {
 	    float m_value;
 	public:
 	    Float(const float);
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	class Boolean : public Node {
+	    bool m_value;
+	public:
+	    Boolean(const bool);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 	

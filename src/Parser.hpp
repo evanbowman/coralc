@@ -41,8 +41,8 @@ namespace coralc {
 	    SUBTRACT,
 	    MULTIPLY,
 	    DIVIDE,
-	    TRUE,
-	    FALSE,
+	    EQUALITY,
+	    BOOLEAN,
 	    RETURN,
 	    MUT,
 	    HASH,
@@ -51,6 +51,7 @@ namespace coralc {
 	    STRING,
 	    FLOAT,
 	    INTEGER,
+	    MODULE,
 	    IDENT
 	};
 	struct TokenInfo {

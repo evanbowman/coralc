@@ -41,6 +41,7 @@ namespace coralc {
 		case Token::ADD: return 2;
 		case Token::SUBTRACT: return 2;
 		case Token::EQUALITY: return 1;
+		default: Error("Unexpected token");
 		}
 	    };
 	do {
@@ -50,10 +51,11 @@ namespace coralc {
 		    outputQueue.push_back(operatorStack.top());
 		    operatorStack.pop();
 		}
+		std::cerr << std::endl;
 		return outputQueue;
 
 	    case Token::ASSIGN:
-		Error("Assignment not allowed here");
+		Error("Assignment not allowed in rhs expression");
 
 	    case Token::END:
 	    case Token::ENDOFFILE:
@@ -145,7 +147,8 @@ namespace coralc {
 	    case Token::EQUALITY: {
 		auto operands = GetValueStackTopTwo();
 		auto equalityOpRef =
-		    std::make_unique<ast::EqualityOp>(std::move(operands.first.node),
+		    std::make_unique<ast::EqualityOp>(operands.first.type,
+						      std::move(operands.first.node),
 						      std::move(operands.second.node));
 		valueStack.push({ast::NodeRef(equalityOpRef.release()), "bool"});
 	    } break;
@@ -156,7 +159,8 @@ namespace coralc {
 		    Error("Type bool cannot be used for arithmetic operations");
 		}
 		auto addOpRef =
-		    std::make_unique<ast::AddOp>(std::move(operands.first.node),
+		    std::make_unique<ast::AddOp>(operands.first.type,
+						 std::move(operands.first.node),
 						 std::move(operands.second.node));
 		valueStack.push({ast::NodeRef(addOpRef.release()), operands.first.type});
 	    } break;
@@ -167,7 +171,8 @@ namespace coralc {
 		    Error("Type bool cannot be used for arithmetic operations");
 		}
 		auto subOpRef =
-		    std::make_unique<ast::SubOp>(std::move(operands.first.node),
+		    std::make_unique<ast::SubOp>(operands.first.type,
+						 std::move(operands.first.node),
 						 std::move(operands.second.node));
 		valueStack.push({ast::NodeRef(subOpRef.release()), operands.first.type});
 	    } break;
@@ -175,7 +180,8 @@ namespace coralc {
 	    case Token::MULTIPLY: {
 		auto operands = GetValueStackTopTwo();
 		auto multOpRef =
-		    std::make_unique<ast::MultOp>(std::move(operands.first.node),
+		    std::make_unique<ast::MultOp>(operands.first.type,
+						  std::move(operands.first.node),
 						  std::move(operands.second.node));
 		valueStack.push({ast::NodeRef(multOpRef.release()), operands.first.type});
 	    } break;
@@ -183,7 +189,8 @@ namespace coralc {
 	    case Token::DIVIDE: {
 		auto operands = GetValueStackTopTwo();
 		auto divOpRef =
-		    std::make_unique<ast::DivOp>(std::move(operands.first.node),
+		    std::make_unique<ast::DivOp>(operands.first.type,
+						 std::move(operands.first.node),
 						 std::move(operands.second.node));
 		valueStack.push({ast::NodeRef(divOpRef.release()), operands.first.type});
 	    } break;
@@ -408,10 +415,7 @@ namespace coralc {
 		    break;
 
 		default: {
-		    auto expression = this->ParseExpression();
-		    if (dynamic_cast<ast::Expr *>(expression.get())->GetType() != "void") {
-			scope->AddChild(this->ParseExpression());
-		    }
+		    Error(m_currentToken.text);
 		} break;
 		}
 	    } else {

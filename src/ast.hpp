@@ -29,7 +29,6 @@ namespace coralc {
 	llvm::IRBuilder<> builder;
 	std::unique_ptr<llvm::Module> modRef;
 	std::stack<llvm::BasicBlock *> stack;
-	std::string parentExprType;
 	FunctionInfo currentFnInfo;
 	std::map<std::string, llvm::AllocaInst *> vars;
 	LLVMState() : builder(context),
@@ -99,33 +98,40 @@ namespace coralc {
 
 	class BinOp : public Node {
 	protected:
+	    std::string m_resultType;
 	    NodeRef m_lhs, m_rhs;
 	public:
-	    BinOp(NodeRef lhs, NodeRef rhs) : m_lhs(std::move(lhs)), m_rhs(std::move(rhs)) {}
+	    BinOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		m_resultType(type), m_lhs(std::move(lhs)), m_rhs(std::move(rhs)) {}
 	};
 
 	struct MultOp : public BinOp {
-	    MultOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    MultOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		BinOp(type, std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
 	struct DivOp : public BinOp {
-	    DivOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    DivOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		BinOp(type, std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
 	struct AddOp : public BinOp {
-	    AddOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    AddOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		BinOp(type, std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
 	struct SubOp : public BinOp {
-	    SubOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    SubOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		BinOp(type, std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
 	struct EqualityOp : public BinOp {
-	    EqualityOp(NodeRef lhs, NodeRef rhs) : BinOp(std::move(lhs), std::move(rhs)) {}
+	    EqualityOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		BinOp(type, std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 

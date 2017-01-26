@@ -70,9 +70,9 @@ namespace coralc {
 	llvm::Value * MultOp::CodeGen(LLVMState & state) {
 	    auto lhs = m_lhs->CodeGen(state);
 	    auto rhs = m_rhs->CodeGen(state);
-	    if (state.parentExprType == "int") {
+	    if (m_resultType == "int") {
 		return state.builder.CreateMul(lhs, rhs);
-	    } else if (state.parentExprType == "float") {
+	    } else if (m_resultType == "float") {
 		return state.builder.CreateFMul(lhs, rhs);
 	    } else {
 		throw std::runtime_error("type cannot be multiplied");
@@ -83,9 +83,9 @@ namespace coralc {
 	llvm::Value * DivOp::CodeGen(LLVMState & state) {
 	    auto lhs = m_lhs->CodeGen(state);
 	    auto rhs = m_rhs->CodeGen(state);
-	    if (state.parentExprType == "int") {
+	    if (m_resultType == "int") {
 		return state.builder.CreateSDiv(lhs, rhs);
-	    } else if (state.parentExprType == "float") {
+	    } else if (m_resultType == "float") {
 		return state.builder.CreateFDiv(lhs, rhs);
 	    } else {
 		throw std::runtime_error("type cannot be divided");
@@ -97,11 +97,11 @@ namespace coralc {
 	    auto lhs = m_lhs->CodeGen(state);
 	    auto rhs = m_rhs->CodeGen(state);
 	    llvm::Value * ret = nullptr;
-	    if (state.parentExprType == "int") {
+	    if (m_resultType == "int") {
 		ret = state.builder.CreateICmpEQ(lhs, rhs, "equality test");
-	    } else if (state.parentExprType == "float") {
+	    } else if (m_resultType == "float") {
 	        ret = state.builder.CreateFCmpOEQ(lhs, rhs, "equality test");
-	    } else if (state.parentExprType == "bool") {
+	    } else if (m_resultType == "bool") {
 	        ret = state.builder.CreateICmpEQ(lhs, rhs, "equality test");
 	    } else {
 		throw std::runtime_error("type cannot be compared");
@@ -114,11 +114,12 @@ namespace coralc {
 	llvm::Value * AddOp::CodeGen(LLVMState & state) {
 	    auto lhs = m_lhs->CodeGen(state);
 	    auto rhs = m_rhs->CodeGen(state);
-	    if (state.parentExprType == "int") {
+	    if (m_resultType == "int") {
 		return state.builder.CreateAdd(lhs, rhs);
-	    } else if (state.parentExprType == "float") {
+	    } else if (m_resultType == "float") {
 		return state.builder.CreateFAdd(lhs, rhs);
 	    } else {
+		std::cerr << m_resultType << std::endl;
 		throw std::runtime_error("type cannot be added");
 	    }
 	    return nullptr;
@@ -127,9 +128,9 @@ namespace coralc {
 	llvm::Value * SubOp::CodeGen(LLVMState & state) {
 	    auto lhs = m_lhs->CodeGen(state);
 	    auto rhs = m_rhs->CodeGen(state);
-	    if (state.parentExprType == "int") {
+	    if (m_resultType == "int") {
 		return state.builder.CreateSub(lhs, rhs);
-	    } else if (state.parentExprType == "float") {
+	    } else if (m_resultType == "float") {
 		return state.builder.CreateFSub(lhs, rhs);
 	    } else {
 		throw std::runtime_error("type cannot be subtracted");
@@ -147,7 +148,6 @@ namespace coralc {
 	}
 
 	llvm::Value * Expr::CodeGen(LLVMState & state) {
-	    state.parentExprType = m_type;
 	    return m_exprSubTree->CodeGen(state);
 	}
 	

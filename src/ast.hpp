@@ -129,8 +129,26 @@ namespace coralc {
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
+	struct LogicalAndOp : public BinOp {
+	    LogicalAndOp(NodeRef lhs, NodeRef rhs) :
+		BinOp("bool", std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	struct LogicalOrOp : public BinOp {
+	    LogicalOrOp(NodeRef lhs, NodeRef rhs) :
+		BinOp("bool", std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+	
 	struct EqualityOp : public BinOp {
 	    EqualityOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		BinOp(type, std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	struct InequalityOp : public BinOp {
+	    InequalityOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
 		BinOp(type, std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};

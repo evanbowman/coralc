@@ -36,11 +36,14 @@ namespace coralc {
 	const auto precedence =
 	    [](Token t) {
 		switch (t) {
-		case Token::MULTIPLY: return 3;
-		case Token::DIVIDE: return 3;
-		case Token::ADD: return 2;
-		case Token::SUBTRACT: return 2;
-		case Token::EQUALITY: return 1;
+		case Token::MULTIPLY: return 4;
+		case Token::DIVIDE: return 4;
+		case Token::ADD: return 3;
+		case Token::SUBTRACT: return 3;
+		case Token::EQUALITY: return 2;
+		case Token::INEQUALITY: return 2;
+		case Token::AND: return 1;
+		case Token::OR: return 1;
 		default: Error("Unexpected token");
 		}
 	    };
@@ -51,7 +54,6 @@ namespace coralc {
 		    outputQueue.push_back(operatorStack.top());
 		    operatorStack.pop();
 		}
-		std::cerr << std::endl;
 		return outputQueue;
 
 	    case Token::ASSIGN:
@@ -67,12 +69,15 @@ namespace coralc {
 	    case Token::BOOLEAN:
 		outputQueue.push_back(m_currentToken);
 		break;
-		
+
+	    case Token::OR:
+	    case Token::AND:
 	    case Token::ADD:
+	    case Token::DIVIDE:
 	    case Token::SUBTRACT:
 	    case Token::MULTIPLY:
-	    case Token::DIVIDE:
 	    case Token::EQUALITY:
+	    case Token::INEQUALITY:
 		while (!operatorStack.empty() && precedence(operatorStack.top().id)
 		       >= precedence(m_currentToken.id)) {
 		    outputQueue.push_back(operatorStack.top());
@@ -144,6 +149,37 @@ namespace coralc {
 		    });
 		break;
 
+	    case Token::AND: {
+		auto operands = GetValueStackTopTwo();
+		if (operands.first.type != "bool" || operands.second.type != "bool") {
+		    Error("Logical and operands must be booleans");
+		}
+		auto andOpRef =
+		    std::make_unique<ast::LogicalAndOp>(std::move(operands.first.node),
+							std::move(operands.second.node));
+	        valueStack.push({ast::NodeRef(andOpRef.release()), "bool"});
+	    } break;
+
+	    case Token::OR: {
+		auto operands = GetValueStackTopTwo();
+		if (operands.first.type != "bool" || operands.second.type != "bool") {
+		    Error("Logical and operands must be booleans");
+		}
+		auto orOpRef =
+		    std::make_unique<ast::LogicalOrOp>(std::move(operands.first.node),
+						       std::move(operands.second.node));
+	        valueStack.push({ast::NodeRef(orOpRef.release()), "bool"});
+	    } break;
+		
+	    case Token::INEQUALITY: {
+		auto operands = GetValueStackTopTwo();
+		auto inequalityOpRef =
+		    std::make_unique<ast::InequalityOp>(operands.first.type,
+							std::move(operands.first.node),
+							std::move(operands.second.node));
+		valueStack.push({ast::NodeRef(inequalityOpRef.release()), "bool"});
+	    } break;
+		
 	    case Token::EQUALITY: {
 		auto operands = GetValueStackTopTwo();
 		auto equalityOpRef =

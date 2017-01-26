@@ -93,22 +93,66 @@ namespace coralc {
 	    return nullptr;
 	}
 
+	static const std::string equalityTag = "equality test";
+	
+	llvm::Value * InequalityOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    llvm::Value * ret = nullptr;
+	    if (m_resultType == "int") {
+		ret = state.builder.CreateICmpNE(lhs, rhs, equalityTag);
+	    } else if (m_resultType == "float") {
+		ret = state.builder.CreateFCmpONE(lhs, rhs, equalityTag);
+	    } else if (m_resultType == "bool") {
+		ret = state.builder.CreateICmpNE(lhs, rhs, equalityTag);
+	    } else {
+		throw std::runtime_error("type cannot be compared");
+	    }
+	    return state.builder.CreateIntCast(ret, llvm::Type::getInt8Ty(state.context), true);
+	}
+
 	llvm::Value * EqualityOp::CodeGen(LLVMState & state) {
 	    auto lhs = m_lhs->CodeGen(state);
 	    auto rhs = m_rhs->CodeGen(state);
 	    llvm::Value * ret = nullptr;
 	    if (m_resultType == "int") {
-		ret = state.builder.CreateICmpEQ(lhs, rhs, "equality test");
+		ret = state.builder.CreateICmpEQ(lhs, rhs, equalityTag);
 	    } else if (m_resultType == "float") {
-	        ret = state.builder.CreateFCmpOEQ(lhs, rhs, "equality test");
+	        ret = state.builder.CreateFCmpOEQ(lhs, rhs, equalityTag);
 	    } else if (m_resultType == "bool") {
-	        ret = state.builder.CreateICmpEQ(lhs, rhs, "equality test");
+	        ret = state.builder.CreateICmpEQ(lhs, rhs, equalityTag);
 	    } else {
 		throw std::runtime_error("type cannot be compared");
 	    }
 	    // I've had trouble with the llvm assembler and single bit bools,
 	    // so I've been casting them to 8 bit integers.
 	    return state.builder.CreateIntCast(ret, llvm::Type::getInt8Ty(state.context), true);
+	}
+
+	llvm::Value * LogicalAndOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    // Note: I use 255 and not 1 as boolean true. This is because I cast comparison
+	    // results to eight bit signed, see above comment.
+	    auto boolTrue = llvm::ConstantInt::get(state.context, llvm::APInt(8, 255));
+	    auto isLhsTrue =
+		state.builder.CreateICmpEQ(lhs, boolTrue);
+	    auto isRhsTrue =
+		state.builder.CreateICmpEQ(rhs, boolTrue);
+	    auto bothTrue = state.builder.CreateAnd(isLhsTrue, isRhsTrue);
+	    return state.builder.CreateIntCast(bothTrue, llvm::Type::getInt8Ty(state.context), true);
+	}
+
+	llvm::Value * LogicalOrOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    auto boolTrue = llvm::ConstantInt::get(state.context, llvm::APInt(8, 255));
+	    auto isLhsTrue =
+		state.builder.CreateICmpEQ(lhs, boolTrue);
+	    auto isRhsTrue =
+		state.builder.CreateICmpEQ(rhs, boolTrue);
+	    auto eitherTrue = state.builder.CreateOr(isLhsTrue, isRhsTrue);
+	    return state.builder.CreateIntCast(eitherTrue, llvm::Type::getInt8Ty(state.context), true);
 	}
 
 	llvm::Value * AddOp::CodeGen(LLVMState & state) {
@@ -119,7 +163,6 @@ namespace coralc {
 	    } else if (m_resultType == "float") {
 		return state.builder.CreateFAdd(lhs, rhs);
 	    } else {
-		std::cerr << m_resultType << std::endl;
 		throw std::runtime_error("type cannot be added");
 	    }
 	    return nullptr;

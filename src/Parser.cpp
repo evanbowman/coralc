@@ -13,13 +13,12 @@ extern "C" {
 }
 
 namespace coralc {
-    static inline void Error(const std::string & err) {
-	// TODO: Line and column info + context!!!
+    void Parser::Error(const std::string & err) {
 	std::string errMsg = "Error [line " +
 	    std::to_string(get_linum()) + "]:\n\t" + err + "\n";
 	throw std::runtime_error(errMsg);
     }
-    
+
     void Parser::Expect(const Token tok, const char * str) {
 	this->NextToken();
 	if (m_currentToken.id != tok) {
@@ -29,67 +28,6 @@ namespace coralc {
     
     Parser::Parser() : m_currentToken({Token::ENDOFFILE, {}}) {}
 
-    std::deque<Parser::TokenInfo> Parser::ParseExprToRPN() {
-	// Shunting Yard algorithm
-	std::stack<TokenInfo> operatorStack;
-	std::deque<TokenInfo> outputQueue;
-	const auto precedence =
-	    [](Token t) {
-		switch (t) {
-		case Token::MULTIPLY: return 4;
-		case Token::DIVIDE: return 4;
-		case Token::ADD: return 3;
-		case Token::SUBTRACT: return 3;
-		case Token::EQUALITY: return 2;
-		case Token::INEQUALITY: return 2;
-		case Token::AND: return 1;
-		case Token::OR: return 1;
-		default: Error("Unexpected token");
-		}
-	    };
-	do {
-	    switch (m_currentToken.id) {
-	    case Token::EXPREND:
-		while (!operatorStack.empty()) {
-		    outputQueue.push_back(operatorStack.top());
-		    operatorStack.pop();
-		}
-		return outputQueue;
-
-	    case Token::ASSIGN:
-		Error("Assignment not allowed in rhs expression");
-
-	    case Token::END:
-	    case Token::ENDOFFILE:
-		Error("Expected ;");
-
-	    case Token::INTEGER:
-	    case Token::FLOAT:
-	    case Token::IDENT:
-	    case Token::BOOLEAN:
-		outputQueue.push_back(m_currentToken);
-		break;
-
-	    case Token::OR:
-	    case Token::AND:
-	    case Token::ADD:
-	    case Token::DIVIDE:
-	    case Token::SUBTRACT:
-	    case Token::MULTIPLY:
-	    case Token::EQUALITY:
-	    case Token::INEQUALITY:
-		while (!operatorStack.empty() && precedence(operatorStack.top().id)
-		       >= precedence(m_currentToken.id)) {
-		    outputQueue.push_back(operatorStack.top());
-		    operatorStack.pop();
-		}
-		operatorStack.push(m_currentToken);
-		break;
-	    }
-	    this->NextToken();
-	} while (true);
-    }
-
     std::pair<ast::NodeRef, std::string>
     Parser::MakeExprSubTree(std::deque<Parser::TokenInfo> && exprQueueRPN) {
 	// This function takes an RPN formatted expression and uses
@@ -98,9 +36,9 @@ namespace coralc {
 	    ast::NodeRef node;
 	    std::string type;
 	};
-	auto OperandTypeError = [](const std::string & t1,
+	auto OperandTypeError = [this](const std::string & t1,
 				   const std::string & t2) {
-				    Error("Operand type mismatch: " + t1 + " and " + t2);
+				    this->Error("Operand type mismatch: " + t1 + " and " + t2);
 				};
 	std::stack<Value> valueStack;
 	auto GetValueStackTopTwo = [&valueStack, OperandTypeError]()
@@ -240,17 +178,10 @@ namespace coralc {
 	}
 	return {std::move(valueStack.top().node), valueStack.top().type};
     }
-
-    ast::NodeRef Parser::ParseExpression() {
-	auto exprQueueRPN = this->ParseExprToRPN();
-	auto exprTreeInfo = this->MakeExprSubTree(std::move(exprQueueRPN));
-	return ast::NodeRef(new ast::Expr(exprTreeInfo.second,
-					  std::move(exprTreeInfo.first)));
-    }
     
     ast::NodeRef Parser::ParseReturn() {
 	this->NextToken();
-	auto exprNode = this->ParseExpression();
+	auto exprNode = this->ParseExpression<Token::EXPREND>();
 	auto expr = dynamic_cast<ast::Expr *>(exprNode.get());
 	assert(expr);
 	if (m_currentFunction.returnType == "") {
@@ -295,6 +226,7 @@ namespace coralc {
 
 	default:
 	    Error("Expected integer or identifier");
+	    break;
 	}
 	this->Expect(Token::RANGE, "Expected ..");
 	this->NextToken();
@@ -365,9 +297,11 @@ namespace coralc {
 	    case Token::VAR:
 	    case Token::MUT:
 		Error("Global variables are not allowed");
+		break;
 
 	    case Token::END:
 		Error("Unexpected end");
+		break;
 	    }
 	    this->NextToken();
 	} while (m_currentToken.id != Token::ENDOFFILE);
@@ -388,7 +322,7 @@ namespace coralc {
 	m_localVars->insert(identName);
 	this->Expect(Token::ASSIGN, "Expected =");
 	this->NextToken();
-	auto expr = this->ParseExpression();
+	auto expr = this->ParseExpression<Token::EXPREND>();
 	auto & exprType = dynamic_cast<ast::Expr *>(expr.get())->GetType();
 	if (exprType == "int") {
 	    m_varTable[identName].type = "int";
@@ -407,6 +341,8 @@ namespace coralc {
 							std::move(expr)));
 	} else if (exprType == "void") {
 	    Error("Attempt to bind void to an l-value");
+	} else {
+	    Error("Unknown type");
 	}
     }
     
@@ -438,6 +374,7 @@ namespace coralc {
 
 		case Token::ENDOFFILE:
 		    Error("Expected end");
+		    break;
 		    
 		case Token::RETURN:
 		    // After seeing a return, no other code in the

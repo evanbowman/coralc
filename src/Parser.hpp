@@ -27,11 +27,16 @@ namespace coralc {
 	    ENDOFFILE,
 	    FOR,
 	    IN,
+	    IF,
+	    THEN,
+	    ELSE,
+	    ELSEIF,
 	    DO,
 	    RANGE,
 	    EXPREND,
 	    END,
 	    VAR,
+	    REVERSE,
 	    DEF,
 	    ASSIGN,
 	    COMMA,
@@ -41,6 +46,7 @@ namespace coralc {
 	    SUBTRACT,
 	    MULTIPLY,
 	    DIVIDE,
+	    MODULUS,
 	    EQUALITY,
 	    INEQUALITY,
 	    BOOLEAN,
@@ -76,6 +82,7 @@ namespace coralc {
 		    switch (t) {
 		    case Token::MULTIPLY: return 4;
 		    case Token::DIVIDE: return 4;
+		    case Token::MODULUS: return 4;
 		    case Token::ADD: return 3;
 		    case Token::SUBTRACT: return 3;
 		    case Token::EQUALITY: return 2;
@@ -109,7 +116,7 @@ namespace coralc {
 		    
 		case Token::END:
 		case Token::ENDOFFILE:
-		    Error("Expected ;");
+		    Error("Expression missing terminator");
 		    break;
 
 		case Token::LPRN:
@@ -142,6 +149,7 @@ namespace coralc {
 		case Token::AND:
 		case Token::ADD:
 		case Token::DIVIDE:
+		case Token::MODULUS:
 		case Token::SUBTRACT:
 		case Token::MULTIPLY:
 		case Token::EQUALITY:
@@ -168,6 +176,7 @@ namespace coralc {
 					      std::move(exprTreeInfo.first)));
 	}
 	ast::NodeRef ParseTopLevelScope();
+	ast::NodeRef ParseIf();
 	ast::NodeRef ParseFunctionDef();
 	ast::ScopeRef ParseScope();
 	ast::NodeRef ParseReturn();

@@ -1,6 +1,6 @@
 CC = clang++
 CXXFLAGS = $(shell llvm-config --cxxflags) -O2 -std=c++14
-LDFLAGS = $(shell llvm-config --ldflags --libs) -lz -lcurses -lm -lcoral-lexer
+LDFLAGS = $(shell llvm-config --ldflags --system-libs --libs) -lz -lcurses -lm -lcoral-lexer
 
 EXEC = coralc
 SOURCES = $(wildcard *.cpp)

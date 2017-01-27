@@ -96,6 +96,23 @@ namespace coralc {
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 
+        struct Conditional : public ScopeProvider {
+	    NodeRef condition;
+	    Conditional(ScopeRef scope, NodeRef cond) :
+		ScopeProvider(std::move(scope)), condition(std::move(cond)) {}
+	};
+
+	class IfElseChain : public Node {
+	    Conditional m_if;
+	    std::vector<Conditional> m_elseifs;
+	    ScopeRef m_else;
+	public:
+	    IfElseChain(Conditional && _if) : m_if(std::move(_if)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	    void InsertElseif(Conditional && elseif);
+	    void SetElse(ScopeRef);
+	};
+
 	class BinOp : public Node {
 	protected:
 	    std::string m_resultType;
@@ -113,6 +130,12 @@ namespace coralc {
 
 	struct DivOp : public BinOp {
 	    DivOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
+		BinOp(type, std::move(lhs), std::move(rhs)) {}
+	    virtual llvm::Value * CodeGen(LLVMState &) override;
+	};
+
+	struct ModOp : public BinOp {
+	    ModOp(const std::string & type, NodeRef lhs, NodeRef rhs) :
 		BinOp(type, std::move(lhs), std::move(rhs)) {}
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
@@ -164,9 +187,10 @@ namespace coralc {
 	class ForLoop : public Node, public ScopeProvider {
 	    std::string m_varName;
 	    NodeRef m_decl, m_end;
+	    bool m_isReverse;
 	public:
 	    const std::string & GetIdentName() const;
-	    ForLoop(NodeRef, NodeRef, ScopeRef);
+	    ForLoop(NodeRef, NodeRef, ScopeRef, const bool);
 	    virtual llvm::Value * CodeGen(LLVMState &) override;
 	};
 

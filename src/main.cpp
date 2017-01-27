@@ -16,15 +16,36 @@ namespace coralc {
 	    std::cerr << ex.what() << std::endl;
 	    exit(EXIT_FAILURE);
 	}
-	//state.modRef->dump();
-	std::string err;
-	auto output = fname + ".bc";
-	std::error_code ec;
-	llvm::raw_fd_ostream dest(output, ec, llvm::sys::fs::F_None);
-	if (ec) {
-	    throw std::runtime_error(ec.message());
+	state.modRef->dump();
+	auto targetTriple = llvm::sys::getDefaultTargetTriple();
+	state.modRef->setTargetTriple(targetTriple);
+	std::string error;
+	auto target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
+	if (!target) {
+	    std::cerr << error;
+	    return;
 	}
-	llvm::WriteBitcodeToFile(state.modRef.get(), dest);
+	auto CPU = "generic";
+	auto features = "";
+	llvm::TargetOptions opt;
+	auto RM = llvm::Optional<llvm::Reloc::Model>();
+	auto targetMachine =
+	    target->createTargetMachine(targetTriple, CPU, features, opt, RM);
+	state.modRef->setDataLayout(targetMachine->createDataLayout());
+	auto outputName = fname + ".o";
+	std::error_code EC;
+	llvm::raw_fd_ostream dest(outputName, EC, llvm::sys::fs::F_None);
+	if (EC) {
+	    std::cerr << "Could not open file: " << EC.message();
+	    return ;
+	}
+	llvm::legacy::PassManager pass;
+	auto FileType = llvm::TargetMachine::CGFT_ObjectFile;
+	if (targetMachine->addPassesToEmitFile(pass, dest, FileType)) {
+	    std::cerr << "TheTargetMachine can't emit a file of this type";
+	    return;
+	}
+	pass.run(*state.modRef);
 	dest.flush();
     }
 }

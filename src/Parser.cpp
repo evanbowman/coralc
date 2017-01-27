@@ -69,7 +69,7 @@ namespace coralc {
 			"int"
 		    });
 		break;
-
+		
 	    case Token::FLOAT:
 		valueStack.push({
 			ast::NodeRef(new ast::Float(std::stof(curr.text))),
@@ -129,8 +129,8 @@ namespace coralc {
 
 	    case Token::ADD: {
 		auto operands = GetValueStackTopTwo();
-		if (operands.first.type == "bool" || operands.second.type == "bool") {
-		    Error("Type bool cannot be used for arithmetic operations");
+		if (operands.first.type != "int" && operands.first.type != "float") {
+		    Error("The \'+\' arithmetic operator expects int or float operands");
 		}
 		auto addOpRef =
 		    std::make_unique<ast::AddOp>(operands.first.type,
@@ -141,8 +141,8 @@ namespace coralc {
 
 	    case Token::SUBTRACT: {
 		auto operands = GetValueStackTopTwo();
-		if (operands.first.type == "bool" || operands.second.type == "bool") {
-		    Error("Type bool cannot be used for arithmetic operations");
+		if (operands.first.type != "int" && operands.first.type != "float") {
+		    Error("The \'-\' arithmetic operator expects int or float operands");
 		}
 		auto subOpRef =
 		    std::make_unique<ast::SubOp>(operands.first.type,
@@ -153,6 +153,9 @@ namespace coralc {
 
 	    case Token::MULTIPLY: {
 		auto operands = GetValueStackTopTwo();
+		if (operands.first.type != "int" && operands.first.type != "float") {
+		    Error("The \'*\' arithmetic operator expects int or float operands");
+		}
 		auto multOpRef =
 		    std::make_unique<ast::MultOp>(operands.first.type,
 						  std::move(operands.first.node),
@@ -162,11 +165,26 @@ namespace coralc {
 
 	    case Token::DIVIDE: {
 		auto operands = GetValueStackTopTwo();
+		if (operands.first.type != "int" && operands.first.type != "float") {
+		    Error("The \'/\' arithmetic operator expects int or float operands");
+		}
 		auto divOpRef =
 		    std::make_unique<ast::DivOp>(operands.first.type,
 						 std::move(operands.first.node),
 						 std::move(operands.second.node));
 		valueStack.push({ast::NodeRef(divOpRef.release()), operands.first.type});
+	    } break;
+
+	    case Token::MODULUS: {
+		auto operands = GetValueStackTopTwo();
+		if (operands.first.type != "int" && operands.first.type != "float") {
+		    Error("The \'%\' arithmetic operator expects int or float operands");
+		}
+		auto modOpRef =
+		    std::make_unique<ast::ModOp>(operands.first.type,
+						 std::move(operands.first.node),
+						 std::move(operands.second.node));
+		valueStack.push({ast::NodeRef(modOpRef.release()), operands.first.type});
 	    } break;
 	    }
 	    exprQueueRPN.pop_front();
@@ -215,6 +233,11 @@ namespace coralc {
 	m_varTable[loopVarName].isMutable = false;
 	this->Expect(Token::IN, "Expected in");
 	this->NextToken();
+	bool reverse = false;
+	if (m_currentToken.id == Token::REVERSE) {
+	    reverse = true;
+	    this->NextToken();
+	}
 	switch (m_currentToken.id) {
 	case Token::INTEGER:
 	    rangeStart = ast::NodeRef(new ast::Integer(std::stoi(m_currentToken.text)));
@@ -242,15 +265,22 @@ namespace coralc {
 	default:
 	    Error("Expected integer or identifier");
 	}
+	if (reverse) {
+	    std::swap(rangeStart, rangeEnd);
+	}
         auto decl = std::make_unique<ast::DeclIntVar>(std::move(declLoopVar),
 						      std::move(rangeStart));
 	this->Expect(Token::DO, "Expected do");
 	this->NextToken();
 	auto scope = this->ParseScope();
 	m_varTable.erase(loopVarName);
+	if (m_currentToken.id != Token::END) {
+	    Error("Expected end");
+	}
 	return ast::NodeRef(new ast::ForLoop(std::move(decl),
 					     std::move(rangeEnd),
-					     std::move(scope)));
+					     std::move(scope),
+					     reverse));
     }
 
     ast::NodeRef Parser::ParseFunctionDef() {
@@ -282,6 +312,9 @@ namespace coralc {
 	    m_currentFunction.returnType = "void";
 	    scope->AddChild(ast::NodeRef(new ast::Return(ast::NodeRef(new ast::Void))));
 	}
+	if (m_currentToken.id != Token::END) {
+	    Error("Expected end");
+	}
 	return ast::NodeRef(new ast::Function(std::move(scope),
 					      fname, m_currentFunction.returnType));
     }
@@ -306,6 +339,35 @@ namespace coralc {
 	    this->NextToken();
 	} while (m_currentToken.id != Token::ENDOFFILE);
 	return ast::NodeRef(topLevel.release());
+    }
+
+    ast::NodeRef Parser::ParseIf() {
+        this->NextToken();
+	auto initCond = this->ParseExpression<Token::THEN>();
+	this->NextToken();	
+	auto ifElseChain =
+	    std::make_unique<ast::IfElseChain>(ast::Conditional(this->ParseScope(),
+								std::move(initCond)));
+	if (m_currentToken.id == Token::END) {
+	    return ast::NodeRef(ifElseChain.release());
+	}
+	while (m_currentToken.id == Token::ELSEIF) {
+	    this->NextToken();
+	    auto midCond = this->ParseExpression<Token::THEN>();
+	    this->NextToken();
+	    ifElseChain->InsertElseif(ast::Conditional(this->ParseScope(), std::move(midCond)));
+	    if (m_currentToken.id == Token::END) {
+		return ast::NodeRef(ifElseChain.release());
+	    }
+	}
+	if (m_currentToken.id == Token::ELSE) {
+	    this->NextToken();
+	    ifElseChain->SetElse(this->ParseScope());
+	}
+	if (m_currentToken.id != Token::END) {
+	    Error("Expected end");
+	}
+	return ast::NodeRef(ifElseChain.release());
     }
 
     ast::NodeRef Parser::ParseDeclVar(const bool mut) {
@@ -368,7 +430,16 @@ namespace coralc {
 		    this->Expect(Token::VAR, "Expected var");
 		    scope->AddChild(this->ParseDeclVar(false));
 		    break;
-		    
+
+		case Token::IF:
+		    scope->AddChild(this->ParseIf());
+		    break;
+
+		    // Note: because all three tokens can terminate
+		    // a scope, callers must check that the correct
+		    // token exists depending on context
+		case Token::ELSE:
+		case Token::ELSEIF:
 		case Token::END:
 		    goto CLEANUPSCOPE;
 
@@ -392,8 +463,12 @@ namespace coralc {
 		} break;
 		}
 	    } else {
-		if (m_currentToken.id == Token::END) {
+		if (m_currentToken.id == Token::END ||
+		    m_currentToken.id == Token::ELSE ||
+		    m_currentToken.id == Token::ELSEIF) {
 		    goto CLEANUPSCOPE;
+		} else if (m_currentToken.id == Token::ENDOFFILE) {
+		    Error("Non-terminated scope");
 		}
 	    }
 	    this->NextToken();

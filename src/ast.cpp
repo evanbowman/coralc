@@ -19,6 +19,14 @@ namespace coralc {
 	    return m_name;
 	}
 
+	void IfElseChain::InsertElseif(Conditional && elseif) {
+	    m_elseifs.push_back(std::move(elseif));
+	}
+
+	void IfElseChain::SetElse(ScopeRef _else) {
+	    m_else = std::move(_else);
+	}
+
 	Boolean::Boolean(const bool value) : m_value(value) {}
 	
 	Return::Return(NodeRef value) : m_value(std::move(value)) {}
@@ -27,11 +35,11 @@ namespace coralc {
 
 	Float::Float(const float value) : m_value(value) {}
 	
-	ForLoop::ForLoop(NodeRef decl, NodeRef end, ScopeRef scope) :
+	ForLoop::ForLoop(NodeRef decl, NodeRef end, ScopeRef scope, const bool isReverse) :
 	    ScopeProvider(std::move(scope)),
 	    m_decl(std::move(decl)),
-	    m_end(std::move(end)) {
-	}
+	    m_end(std::move(end)),
+	    m_isReverse(isReverse) {}
 
 	const std::string & ForLoop::GetIdentName() const {
 	    return dynamic_cast<DeclIntVar &>(*m_decl).GetIdentName();
@@ -168,6 +176,18 @@ namespace coralc {
 	    return nullptr;
 	}
 
+	llvm::Value * ModOp::CodeGen(LLVMState & state) {
+	    auto lhs = m_lhs->CodeGen(state);
+	    auto rhs = m_rhs->CodeGen(state);
+	    if (m_resultType == "int") {
+		return state.builder.CreateSRem(lhs, rhs);
+	    } else if (m_resultType == "float") {
+		return state.builder.CreateFRem(lhs, rhs);
+	    } else {
+		throw std::runtime_error("__Internal: unexpected type in mod op");
+	    }
+	}
+	
 	llvm::Value * SubOp::CodeGen(LLVMState & state) {
 	    auto lhs = m_lhs->CodeGen(state);
 	    auto rhs = m_rhs->CodeGen(state);
@@ -269,7 +289,67 @@ namespace coralc {
 	    }
 	    return nullptr;
 	}
-	
+
+	llvm::Value * IfElseChain::CodeGen(LLVMState & state) {
+	    auto fn = state.builder.GetInsertBlock()->getParent();
+	    auto headerBlock = llvm::BasicBlock::Create(state.context, "ifcond", fn);
+	    state.builder.CreateBr(headerBlock);
+	    auto afterBlock = llvm::BasicBlock::Create(state.context, "afterifelse", fn);
+	    auto ifBlock = llvm::BasicBlock::Create(state.context, "ifbody", fn);
+	    struct ElseifBlock {
+		llvm::BasicBlock * condBlock, * bodyBlock;
+	    };
+	    std::vector<ElseifBlock> elseifBlocks;
+	    for (size_t i = 0; i < m_elseifs.size(); ++i) {
+		elseifBlocks.push_back({
+			llvm::BasicBlock::Create(state.context, "elseifcond", fn),
+			llvm::BasicBlock::Create(state.context, "elseifbody", fn)
+		    });
+	    }
+	    llvm::BasicBlock * elseBody = nullptr;
+	    if (m_else) {
+		elseBody = llvm::BasicBlock::Create(state.context, "elsebody", fn);
+		state.builder.SetInsertPoint(elseBody);
+		m_else->CodeGen(state);
+		state.builder.CreateBr(afterBlock);
+	    }
+	    state.builder.SetInsertPoint(headerBlock);
+	    auto ifCond = state.builder.CreateIntCast(m_if.condition->CodeGen(state),
+						      llvm::Type::getInt1Ty(state.context), true);
+	    if (elseifBlocks.size() > 0) { 
+		state.builder.CreateCondBr(ifCond, ifBlock, elseifBlocks[0].condBlock);
+	    } else if (m_else) {
+		state.builder.CreateCondBr(ifCond, ifBlock, elseBody);
+	    } else {
+		state.builder.CreateCondBr(ifCond, ifBlock, afterBlock);
+	    }
+	    state.builder.SetInsertPoint(ifBlock);
+	    state.stack.push(afterBlock);
+	    m_if.GetScope().CodeGen(state);
+	    state.stack.pop();
+	    for (size_t i = 0; i < elseifBlocks.size(); ++i) {
+		state.builder.SetInsertPoint(elseifBlocks[i].condBlock);
+		auto elseifCond = state.builder.CreateIntCast(m_elseifs[i].condition->CodeGen(state),
+							      llvm::Type::getInt1Ty(state.context), true);
+		if (i == elseifBlocks.size() - 1) {
+		    if (m_else) {
+			state.builder.CreateCondBr(elseifCond, elseifBlocks[i].bodyBlock, elseBody);
+		    } else {
+			state.builder.CreateCondBr(elseifCond, elseifBlocks[i].bodyBlock, afterBlock);
+		    }
+		} else {
+		    state.builder.CreateCondBr(elseifCond, elseifBlocks[i].bodyBlock,
+					       elseifBlocks[i + 1].condBlock);
+		}
+		state.builder.SetInsertPoint(elseifBlocks[i].bodyBlock);
+		state.stack.push(afterBlock);
+		m_elseifs[i].GetScope().CodeGen(state);
+		state.stack.pop();
+	    }
+	    state.builder.SetInsertPoint(afterBlock);
+	    return llvm::Constant::getNullValue(llvm::Type::getInt32Ty(state.context));
+	}
+
 	llvm::Value * ForLoop::CodeGen(LLVMState & state) {
 	    auto fn = state.builder.GetInsertBlock()->getParent();
 	    m_decl->CodeGen(state);
@@ -285,9 +365,14 @@ namespace coralc {
 	    state.stack.pop();
 	    state.builder.SetInsertPoint(loopBlock);
 	    auto stepVal = llvm::ConstantInt::get(state.context, llvm::APInt(32, 1));
-	    auto endCond = m_end->CodeGen(state);
+	    auto endCond = state.builder.CreateSub(m_end->CodeGen(state), stepVal);
 	    auto currVar = state.builder.CreateLoad(alloca, varName.c_str());
-	    auto nextVar = state.builder.CreateFAdd(currVar, stepVal, "nextvar");
+	    llvm::Value * nextVar = nullptr;
+	    if (m_isReverse) {
+		nextVar = state.builder.CreateSub(currVar, stepVal, "nextvar");
+	    } else {
+		nextVar = state.builder.CreateAdd(currVar, stepVal, "nextvar");
+	    }
 	    state.builder.CreateStore(nextVar, alloca);
 	    endCond = state.builder.CreateICmpNE(endCond, nextVar, "loopcond");
 	    state.builder.CreateCondBr(endCond, loopBody, afterBlock);

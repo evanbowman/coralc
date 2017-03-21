@@ -2,6 +2,8 @@
 
 ## Introduction
 
+Note: I am no longer working on this project. My goal here was to better understand how compilers work. Feel free to take the code and do whatever with it.
+
 coralc is the compiler for a new programming language, called Coral. Coral has a simple syntax inspired by Ruby and Lua, but compiles to native machine code.
 
 ## Language features
